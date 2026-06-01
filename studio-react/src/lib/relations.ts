@@ -108,18 +108,27 @@ export function sqlLiteral(v: string | number | boolean | null): string {
 }
 
 /**
- * The read-only SELECT that fetches the related rows for a drilldown crumb.
+ * The base WHERE expression (without `WHERE`) pinning a drilldown crumb to its
+ * related rows: `fk = <value>`. Returns "" when the crumb has no filter (the
+ * root/origin crumb). Composable with the FilterBar's compiled WHERE.
+ */
+export function crumbWhere(crumb: DrilldownCrumb): string {
+  if (!crumb.filterColumn || crumb.filterValue === undefined) return "";
+  return `${ident(crumb.filterColumn)} = ${sqlLiteral(crumb.filterValue)}`;
+}
+
+/**
+ * The read-only SELECT that fetches the related rows for a drilldown crumb,
+ * optionally composing an extra WHERE expression (the FilterBar's compiled
+ * filter) with the crumb's own `fk = <pk>` condition (joined by AND).
  * For an incoming relation (children): `SELECT * FROM child WHERE fk = <pk>`.
  * For an outgoing relation (parent):   `SELECT * FROM parent WHERE pk = <fk>`.
  */
-export function drilldownSql(crumb: DrilldownCrumb): string {
+export function drilldownSql(crumb: DrilldownCrumb, extraWhere = ""): string {
   const qualified = `${ident(crumb.schema)}.${ident(crumb.table)}`;
-  if (!crumb.filterColumn || crumb.filterValue === undefined) {
-    return `SELECT * FROM ${qualified} LIMIT 200`;
-  }
-  return `SELECT * FROM ${qualified} WHERE ${ident(crumb.filterColumn)} = ${sqlLiteral(
-    crumb.filterValue
-  )} LIMIT 200`;
+  const parts = [crumbWhere(crumb), extraWhere.trim()].filter((p) => p !== "");
+  const whereClause = parts.length ? ` WHERE ${parts.join(" AND ")}` : "";
+  return `SELECT * FROM ${qualified}${whereClause} LIMIT 200`;
 }
 
 /**

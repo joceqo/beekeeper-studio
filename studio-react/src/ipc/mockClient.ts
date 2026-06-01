@@ -1,5 +1,6 @@
 import type {
   BackendClient,
+  CellValue,
   ColumnDef,
   GetRecordsParams,
   GetRelationCountsParams,
@@ -77,6 +78,130 @@ function genericRows(table: string, count: number) {
     if (fk) row.splice(1, 0, fkValueFor(table, i));
     return row;
   });
+}
+
+/**
+ * Best-effort, in-memory evaluator for a subset of a compiled SQL WHERE string
+ * (the output of lib/filters.ts {@link compileWhere}). Supports a flat
+ * AND/OR-joined list of simple predicates so the FilterBar filters visibly
+ * offline. Nested parens and BETWEEN/IN are tolerated but treated leniently:
+ * unrecognised predicates evaluate to `true` (never hide rows the mock can't
+ * understand). The real backend (MCP) runs the full SQL.
+ *
+ * Recognised predicates (col is `"name"`):
+ *   "col" = 'v' | <n>            equals
+ *   "col" <> 'v'                 not equals
+ *   "col" > / >= / < / <= <n>    comparisons
+ *   "col" ILIKE '%v%' ...        contains/starts/ends (case-insensitive)
+ *   "col" NOT ILIKE '%v%' ...    not contains
+ *   "col" IS NULL / IS NOT NULL
+ *   "col" IN (a, b)              membership
+ */
+function evalSimpleWhere(where: string, columns: ColumnDef[], row: CellValue[]): boolean {
+  const colIndex = (name: string) => columns.findIndex((c) => c.name === name);
+  const cellOf = (name: string): CellValue => {
+    const i = colIndex(name);
+    return i >= 0 ? row[i] : null;
+  };
+  const unquote = (lit: string): string => {
+    const t = lit.trim();
+    if (t.startsWith("'") && t.endsWith("'")) {
+      return t.slice(1, -1).replace(/''/g, "'");
+    }
+    return t;
+  };
+
+  // Split into clauses on top-level AND/OR (ignore nesting; good enough for mock).
+  // We evaluate OR with lower precedence than AND across the flat list.
+  const orParts = where.split(/\s+OR\s+/i);
+  return orParts.some((orPart) => {
+    const andParts = orPart.split(/\s+AND\s+/i);
+    return andParts.every((clause) => evalClause(clause, cellOf, unquote));
+  });
+}
+
+function evalClause(
+  raw: string,
+  cellOf: (name: string) => CellValue,
+  unquote: (lit: string) => string
+): boolean {
+  const clause = raw.replace(/^[\s(]+|[\s)]+$/g, "");
+  const colRe = /^"((?:[^"]|"")*)"\s*/;
+  const m = colRe.exec(clause);
+  if (!m) return true; // unrecognised → don't hide
+  const col = m[1].replace(/""/g, '"');
+  const rest = clause.slice(m[0].length).trim();
+  const cell = cellOf(col);
+
+  // IS [NOT] NULL
+  if (/^IS\s+NOT\s+NULL/i.test(rest)) return cell !== null && cell !== undefined;
+  if (/^IS\s+NULL/i.test(rest)) return cell === null || cell === undefined;
+
+  // [NOT] ILIKE/LIKE 'pattern'
+  const likeM = /^(NOT\s+)?I?LIKE\s+'((?:[^']|'')*)'/i.exec(rest);
+  if (likeM) {
+    const negate = !!likeM[1];
+    const pattern = likeM[2].replace(/''/g, "'");
+    const hit = likeMatch(String(cell ?? ""), pattern);
+    return negate ? !hit : hit;
+  }
+
+  // IN (a, b, ...)
+  const inM = /^(NOT\s+)?IN\s*\(([^)]*)\)/i.exec(rest);
+  if (inM) {
+    const negate = !!inM[1];
+    const items = inM[2].split(",").map((s) => unquote(s));
+    const hit = items.some((it) => String(cell ?? "") === it);
+    return negate ? !hit : hit;
+  }
+
+  // Comparison / equality operators.
+  const opM = /^(<>|!=|>=|<=|=|>|<)\s*(.+)$/.exec(rest);
+  if (opM) {
+    const op = opM[1];
+    const rhsLit = opM[2].trim();
+    const rhs = unquote(rhsLit);
+    const numL = Number(cell);
+    const numR = Number(rhs);
+    const bothNum = Number.isFinite(numL) && Number.isFinite(numR) && rhs.trim() !== "";
+    switch (op) {
+      case "=":
+        return bothNum ? numL === numR : String(cell ?? "") === rhs;
+      case "<>":
+      case "!=":
+        return bothNum ? numL !== numR : String(cell ?? "") !== rhs;
+      case ">":
+        return bothNum ? numL > numR : String(cell ?? "") > rhs;
+      case ">=":
+        return bothNum ? numL >= numR : String(cell ?? "") >= rhs;
+      case "<":
+        return bothNum ? numL < numR : String(cell ?? "") < rhs;
+      case "<=":
+        return bothNum ? numL <= numR : String(cell ?? "") <= rhs;
+    }
+  }
+
+  return true; // unrecognised tail → don't hide
+}
+
+/** Case-insensitive SQL LIKE/ILIKE match supporting `%` and `_` wildcards. */
+function likeMatch(value: string, pattern: string): boolean {
+  // Unescape the `\` escapes the compiler emits, tracking which chars are literal.
+  let regex = "";
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i];
+    if (ch === "\\" && i + 1 < pattern.length) {
+      regex += pattern[i + 1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      i++;
+    } else if (ch === "%") {
+      regex += ".*";
+    } else if (ch === "_") {
+      regex += ".";
+    } else {
+      regex += ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+  }
+  return new RegExp(`^${regex}$`, "i").test(value);
 }
 
 /**
@@ -180,8 +305,17 @@ export class MockBackendClient implements BackendClient {
     await delay(jitter(120, 420));
 
     const columns = params.table === "users" ? USERS_COLUMNS : genericColumns(params.table);
-    const full =
+    let full =
       params.table === "users" ? buildUsersRows(total) : genericRows(params.table, total);
+
+    // Honor a simple subset of the compiled WHERE so the FilterBar visibly
+    // filters offline (equals, not-equals, contains/not-contains, comparisons,
+    // is [not] null). See {@link evalSimpleWhere}.
+    if (params.where && params.where.trim()) {
+      full = full.filter((row) =>
+        evalSimpleWhere(params.where as string, columns, row as CellValue[])
+      );
+    }
 
     // Client-driven sort over the full set before paging.
     const sort = params.orderBy?.[0];

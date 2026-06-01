@@ -13,12 +13,15 @@ import {
   type TableDescription,
 } from "@/ipc";
 import { DataGrid } from "./DataGrid";
+import { FilterBar } from "./FilterBar";
 import { DetailPanel } from "@/components/detail/DetailPanel";
 import { useActivityStore } from "@/store/activity";
 import { useStatusStore } from "@/store/status";
 import { useSelectionStore } from "@/store/selection";
 import { useDetailDockStore } from "@/store/detailDock";
 import { useTabsStore, type DrilldownCrumb } from "@/store/tabs";
+import { useFilterStore } from "@/store/filters";
+import { compileWhere } from "@/lib/filters";
 import {
   relationColumns,
   localValue,
@@ -70,7 +73,11 @@ export function RelationView({ tabId, connectionId, path }: Props) {
   const dockWidth = useDetailDockStore((s) => s.width);
   const setDockWidth = useDetailDockStore((s) => s.setWidth);
 
-  const sql = useMemo(() => drilldownSql(crumb), [crumb]);
+  // Compose the drilldown's pinned `fk = value` condition with the FilterBar's
+  // compiled WHERE so the same filter engine refines a drilldown.
+  const filterRoot = useFilterStore((s) => s.byTab[tabId]);
+  const where = useMemo(() => compileWhere(filterRoot ?? null), [filterRoot]);
+  const sql = useMemo(() => drilldownSql(crumb, where), [crumb, where]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -204,6 +211,8 @@ export function RelationView({ tabId, connectionId, path }: Props) {
           </button>
         </div>
       </div>
+
+      <FilterBar tabId={tabId} columns={description?.columns ?? columns} />
 
       <div className="flex min-h-0 flex-1">
         <div className="relative min-h-0 min-w-0 flex-1">

@@ -118,6 +118,13 @@ export interface GetRecordsParams {
   offset?: number;
   /** Optional client-driven sort, applied via getRecords. */
   orderBy?: { column: string; direction: "asc" | "desc" }[];
+  /**
+   * Optional compiled SQL WHERE expression (without the leading `WHERE`),
+   * produced by {@link compileWhere} in lib/filters.ts. When present, records
+   * are filtered by it. The mock honors a simple subset; the MCP client appends
+   * it to a SELECT.
+   */
+  where?: string;
 }
 
 /** A table node in the schema relationship graph. */

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   RefreshCw,
-  Filter,
   ArrowDownUp,
   Plus,
   ChevronLeft,
@@ -12,12 +11,15 @@ import {
 } from "lucide-react";
 import { backend, type RecordPage, type TableDescription } from "@/ipc";
 import { DataGrid, type SortState } from "./DataGrid";
+import { FilterBar } from "./FilterBar";
 import { DetailPanel } from "@/components/detail/DetailPanel";
 import { useActivityStore } from "@/store/activity";
 import { useStatusStore } from "@/store/status";
 import { useSelectionStore } from "@/store/selection";
 import { useDetailDockStore } from "@/store/detailDock";
 import { useTabsStore, type DrilldownCrumb } from "@/store/tabs";
+import { useFilterStore } from "@/store/filters";
+import { compileWhere } from "@/lib/filters";
 import {
   relationColumns,
   localValue,
@@ -44,6 +46,10 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
   const [sort, setSort] = useState<SortState | null>(null);
   const pushActivity = useActivityStore((s) => s.push);
   const setStatus = useStatusStore((s) => s.set);
+
+  // Active per-tab filter tree → compiled read-only WHERE.
+  const filterRoot = useFilterStore((s) => s.byTab[tabId]);
+  const where = useMemo(() => compileWhere(filterRoot ?? null), [filterRoot]);
 
   // Selection (drives the detail panel) + dock visibility.
   const selection = useSelectionStore((s) => s.byTab[tabId]) ?? {
@@ -87,10 +93,12 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
           limit: PAGE_SIZE,
           offset,
           orderBy: sort ? [{ column: sort.column, direction: sort.direction }] : undefined,
+          where: where || undefined,
         });
         await descPromise;
         setPage(p);
         setStatus({ elapsedMs: p.elapsedMs, loaded: p.loaded, total: p.totalRows });
+        const whereClause = where ? ` WHERE ${where}` : "";
         const orderClause = sort
           ? ` ORDER BY "${sort.column}" ${sort.direction.toUpperCase()}`
           : "";
@@ -99,7 +107,7 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
           op: "SELECT",
           connection: connectionId.replace(/[-:]/g, " "),
           tables: `${schema}.${table}`,
-          sql: `SELECT * FROM "${schema}"."${table}"${orderClause} LIMIT ${PAGE_SIZE} OFFSET ${offset}`,
+          sql: `SELECT * FROM "${schema}"."${table}"${whereClause}${orderClause} LIMIT ${PAGE_SIZE} OFFSET ${offset}`,
           durationMs: p.elapsedMs,
           rows: p.loaded,
         });
@@ -109,9 +117,14 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
         setPage(null);
       })
       .finally(() => setLoading(false));
-  }, [connectionId, schema, table, offset, sort, pushActivity, setStatus]);
+  }, [connectionId, schema, table, offset, sort, where, pushActivity, setStatus]);
 
   useEffect(load, [load]);
+
+  // Reset to the first page whenever the filter changes so paging stays valid.
+  useEffect(() => {
+    setOffset(0);
+  }, [where]);
 
   // Cycle asc -> desc -> none, resetting to the first page on sort change.
   const onSort = useCallback((column: string) => {
@@ -189,9 +202,6 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
         <button className="grid-toolbar-btn" onClick={load} title="Refresh">
           <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
         </button>
-        <button className="grid-toolbar-btn" title="Filter">
-          <Filter size={13} />
-        </button>
         <button
           className="grid-toolbar-btn"
           title={sort ? `Sorted by ${sort.column} (${sort.direction})` : "Click a column header to sort"}
@@ -237,6 +247,8 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
           </button>
         </div>
       </div>
+
+      <FilterBar tabId={tabId} columns={description?.columns ?? page?.columns ?? []} />
 
       <div className="flex min-h-0 flex-1">
         <div className="relative min-h-0 min-w-0 flex-1">

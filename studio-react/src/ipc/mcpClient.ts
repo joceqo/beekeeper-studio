@@ -405,16 +405,20 @@ export class McpBackendClient implements BackendClient {
     const started = performance.now();
     let rowObjs: Record<string, CellValue>[];
     const sort = params.orderBy?.[0];
+    const where = params.where?.trim();
 
-    if (sort) {
-      // The get_records tool ignores orderBy, so issue an explicit ordered query.
+    if (sort || where) {
+      // The get_records tool ignores orderBy and has no WHERE param, so issue an
+      // explicit query composing the compiled filter, sort, and paging.
       const ident = (s: string) => `"${s.replace(/"/g, '""')}"`;
       const qualified = params.schema
         ? `${ident(params.schema)}.${ident(params.table)}`
         : ident(params.table);
-      const sql = `SELECT * FROM ${qualified} ORDER BY ${ident(sort.column)} ${
-        sort.direction === "desc" ? "DESC" : "ASC"
-      } LIMIT ${limit} OFFSET ${offset}`;
+      const whereClause = where ? ` WHERE ${where}` : "";
+      const orderClause = sort
+        ? ` ORDER BY ${ident(sort.column)} ${sort.direction === "desc" ? "DESC" : "ASC"}`
+        : "";
+      const sql = `SELECT * FROM ${qualified}${whereClause}${orderClause} LIMIT ${limit} OFFSET ${offset}`;
       const results = await this.callTool<
         { rows: Record<string, CellValue>[]; rowCount: number }[]
       >("execute_query", { connectionId: live, sql });

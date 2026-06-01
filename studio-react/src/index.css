@@ -171,6 +171,26 @@ body {
   color: var(--color-text-primary);
 }
 
+/* FilterBar inputs/selects, themed to the design tokens. */
+.filter-select,
+.filter-input {
+  height: 1.5rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  padding: 0 0.375rem;
+}
+.filter-input {
+  min-width: 6rem;
+}
+.filter-select:focus,
+.filter-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
 /* ----------------------------------------------------------------------------
  * React Flow schema graph — themed to the app's design tokens (dark + light).
  * The base style.css is imported in SchemaGraphView; these variables and rules
