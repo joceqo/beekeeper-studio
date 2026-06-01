@@ -206,3 +206,76 @@ filtered query (drives the same grid). Persist the active filter per tab in a
 compiled WHERE (read path), or add an optional `where` param to `get_records`.
 Compose with sorting/paging already in the grid. This composes naturally with
 the drilldown (a drilldown tab is just a pre-seeded condition `fk = value`).
+
+---
+
+# Official reference (changelog + official screenshot, v0.1.4 shot)
+
+Corrects/sharpens the reverse-engineered guesses with ground truth.
+
+## What the official "orders" screenshot shows (our biggest gaps)
+
+1. **Drilldown breadcrumb is a BRANCHING TREE, not linear.** Top bar:
+   `customers › reviews › products #142 › inventory_log › reviews` AND a second
+   branch `customers ⌐ orders › shipments`. Each hop is a removable chip (×),
+   the active node is orange, and a pinned record shows as `#142`. Back/forward
+   arrows + a refresh. Ours is a single linear path — needs to become a tree
+   with branch points + removable chips + pinned-record nodes.
+2. **Relation columns are first-class, inline, with per-row counts.**
+   `order_items (3)`, `shipments (1)`, dimmed `shipments (0)` — the count shows
+   on EVERY row (not just the selected one), header has a `↗` icon. FK columns
+   (`customer_id`) render as an **orange clickable link** with a `→`. Ours
+   appends relation chips and only counts the selected row.
+3. **Semantic-type icons in column headers:** 🔑 (pk `id`), `T` (text), `🔗`
+   (fk/relation, orange), `{}` (json `shipping_address`), `↗` (relation). We
+   show none.
+4. **Filter = compact chip bar + command input.** `customer_id = <uuid>` chip
+   with a lock toggle, `+`, `Clear`, plus a sort chip `1 ↕ id ×`. Opened with
+   `f` / ⌘⇧F (single command input, v0.5.0). View-mode toggles (table/grid) in
+   the toolbar. Ours is an expandable tree editor — keep the engine, but the
+   bar should read as compact chips.
+5. **Sidebar has folders + env tags + counts.** CONNECTIONS grouped in folders
+   (`Demo` ▸ accounting `TST`, ecommerce `STG`, mailman `DEV` — colored env
+   tags + connection paint dots); `Production` folder. FAVORITES (ecommerce ▸
+   MVPs). EXPLORER = schema folders with counts (`analytics 6`, `public 20`)
+   and per-table row counts (`inventory_log 10.0K`, `returns 254`). Search hint
+   `/t`. Ours is a flat list, no folders/tags/counts.
+6. **Status bar:** `ecommerce · 9ms 100 loaded / ~2.0K total · v0.1.4`.
+
+## Feature timeline highlights (from the changelog)
+
+- **Filtering** rebuilt around a single command input (`f`/⌘⇧F) — v0.5.0.
+- **Command palette** = ⌘K (also `/`); **DB switcher** = ⌘D; zoom ⌘±/⌘0;
+  reconnect ⇧R; run query ctrl/⌘/shift+Enter.
+- **Editing**: insert rows (double-click below last row, or `+`), delete rows
+  (shift+Delete), cell editor for low-cardinality/enums, JSON editor, **array
+  editor** (text[]/int[]/uuid[]), big-text popout, 4 KB cell preview slicing.
+- **Per-connection AI access** (Hidden/Read/Write) — v0.5.4 (the toggle we
+  already added). **Connection paint** (colors) same release.
+- **MCP**: HTTP server (v0.1.7), `connect` tool (v0.1.9), `list_schemas`,
+  per-call source attribution in the log panel, MCP settings tab with
+  copy-paste config for Claude/Cursor/Windsurf, enforces connection limit.
+- **get_schema_graph** explores from starting tables with configurable **depth**
+  (default 1) — NOT a full dump. Graph tab opens with the table **pinned**.
+  (Ours currently renders the whole schema — should default to depth 1 from a
+  focus table.)
+- **M2M**: collapsed join tables report the correct row count in the cell and
+  add a join filter to the linked filter bar.
+- Drivers shipped in order: Postgres (v0.1.0) → MySQL (v0.3.0) → SQLite (v0.5.5)
+  → Neon (v0.5.2). SSH tunneling v0.4.3. Multi-database v0.4.0 (⌘D switcher,
+  per-connection workspaces).
+- Grid went **canvas** for GPU-accelerated scroll at v0.5.8 (we already use
+  Glide canvas).
+
+## Revised top priorities (sharpened by the official shot)
+
+1. **Drilldown parity**: branching breadcrumb tree (removable chips, pinned
+   records, orange active) + inline relation columns with **per-row counts** +
+   FK-as-orange-link. This is the signature feature and our biggest visual gap.
+2. **Semantic-type column headers** (icons + colors) — cheap, high visual impact.
+3. **Sidebar**: connection folders + env tags + connection paint; schema
+   folders with counts + per-table row counts; group-by-prefix.
+4. **Editing + insert + preview/commit writes** (maps to our MCP write guard).
+5. **Schema graph depth-from-focus** (default depth 1, pin the table) instead of
+   full-schema dump.
+6. Command palette (⌘K) + DB switcher (⌘D) + keybindings.
