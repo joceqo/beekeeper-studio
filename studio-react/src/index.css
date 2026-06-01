@@ -170,3 +170,127 @@ body {
   background-color: var(--color-bg-hover);
   color: var(--color-text-primary);
 }
+
+/* ----------------------------------------------------------------------------
+ * React Flow schema graph — themed to the app's design tokens (dark + light).
+ * The base style.css is imported in SchemaGraphView; these variables and rules
+ * override it so the canvas, controls and minimap match the surrounding UI.
+ * ------------------------------------------------------------------------- */
+.react-flow {
+  --xy-background-color: var(--color-bg-primary);
+  --xy-edge-stroke: var(--color-accent);
+  --xy-edge-stroke-width: 1.5;
+  --xy-attribution-background-color: transparent;
+}
+
+.react-flow__background {
+  background-color: var(--color-bg-primary);
+}
+.react-flow__background-pattern.dots circle {
+  fill: var(--color-border);
+}
+
+/* Controls + MiniMap as themed surfaces. */
+.react-flow__controls {
+  box-shadow: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.react-flow__controls-button {
+  background: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  fill: var(--color-text-secondary);
+}
+.react-flow__controls-button:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+  fill: var(--color-text-primary);
+}
+.react-flow__controls-button svg {
+  fill: currentColor;
+}
+.react-flow__minimap {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+.react-flow__minimap-mask {
+  fill: var(--color-bg-primary);
+  fill-opacity: 0.55;
+}
+
+.react-flow__edge-text {
+  fill: var(--color-text-muted);
+}
+
+/* Table node card. */
+.schema-node {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
+  font-family: var(--font-mono);
+  overflow: hidden;
+}
+/* M2M join tables: dimmed + dashed so the relationship reads as a connector. */
+.schema-node[data-join] {
+  border-style: dashed;
+  opacity: 0.78;
+  background: var(--color-bg-primary);
+}
+.schema-node__header {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding-inline: 0.5rem;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-surface);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+.schema-node__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.schema-node__badge {
+  margin-left: auto;
+  padding-inline: 0.25rem;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-muted);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.schema-node__body {
+  display: flex;
+  flex-direction: column;
+}
+.schema-node__row {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding-inline: 0.5rem;
+  font-size: var(--text-xs);
+}
+.schema-node__row--empty {
+  color: var(--color-text-muted);
+}
+.schema-node__col-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+}
+.schema-node__col-type {
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 9px;
+  color: var(--color-text-muted);
+}

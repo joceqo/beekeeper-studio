@@ -91,6 +91,8 @@ the `mcp-session-id` header), then `tools/call`s `list_saved_connections` /
 - Tailwind CSS v4 (`@theme` tokens in `src/index.css`, mapped 1:1 from
   `~/Desktop/records/SlashTable/css/design-tokens.json`)
 - `@glideapps/glide-data-grid` — the canvas data grid (centerpiece)
+- `@xyflow/react` (+ `dagre` for directed auto-layout) — the schema
+  relationship graph (FK edges, cardinality, M2M join-table detection)
 - `@monaco-editor/react` — the SQL editor
 - `@radix-ui/react-*` — tabs / tooltip primitives
 - `lucide-react` — icons
