@@ -279,3 +279,57 @@ Corrects/sharpens the reverse-engineered guesses with ground truth.
 5. **Schema graph depth-from-focus** (default depth 1, pin the table) instead of
    full-schema dump.
 6. Command palette (⌘K) + DB switcher (⌘D) + keybindings.
+
+---
+
+# Drilldown v2 spec (for studio-react, after the UI overhaul)
+
+Brings our drilldown to parity with the official screenshot. Build on the
+existing `lib/relations.ts`, `RelationView.tsx`, `useRelationCounts.ts`, the
+`tabs` store, and the new `get_relation_counts` MCP tool.
+
+## 1. Inline relation columns with per-row counts
+- Render relation columns as first-class grid columns (after data columns) with
+  a `↗` header icon, e.g. `order_items`, `shipments`.
+- Each cell shows the count for THAT row: `order_items (3)`, dimmed `shipments (0)`.
+  → fetch counts for the visible page, not just the selected row. Batch one
+  `get_relation_counts` per row-key, or a single grouped query
+  (`SELECT fk, count(*) ... WHERE fk IN (<page pks>) GROUP BY fk`) — prefer the
+  grouped query for the page to stay cheap. Cache per (table, page).
+- Clicking a relation cell drills in (opens/extends the breadcrumb, see §3).
+
+## 2. FK value as orange link
+- A column that IS a foreign key (e.g. `customer_id`) renders its value as an
+  accent-colored (`var(--color-accent)`) clickable link with a trailing `→`.
+- Clicking navigates to the parent row (the `N:1` direction): drill into the
+  referenced table filtered to PK = this value.
+
+## 3. Branching breadcrumb (the signature)
+- The breadcrumb is a TREE, not a linear path: from one node you can follow
+  multiple relations, creating branches (the screenshot shows `customers`
+  branching into both `reviews › products #142 › inventory_log` AND
+  `orders › shipments`).
+- Each node is a removable chip (`×`); the active node is accent-colored; a
+  node pinned to a specific record shows `#142`. Back/forward arrows navigate
+  history; clicking a chip makes it active (and shows that node's rows).
+- Model: a tree of `{ id, table, schema, relation?, recordKey?, children[] }`
+  in the tabs store (extend the current linear `DrilldownCrumb[]`). Active path
+  = highlighted; siblings collapsible with a count pill (changelog v0.2.7).
+- Each drilldown step = a pre-seeded filter condition (`fk = value` /
+  `pk = value`) — reuse `lib/filters.ts` so the linked FilterBar shows the join
+  filter (changelog v0.5.9: collapsed M2M join filter appears in the filter bar).
+
+## 4. Semantic-type column-header icons
+- Header shows an icon by semantic type: 🔑 PK, `T` text, `#`/number, `{}` json,
+  bool, date/timestamp, `🔗` FK (accent), `↗` relation, image, url, email, uuid.
+- Derive from `describe_table` (column type + pk/fk flags) → a `semanticType()`
+  helper; render a small Lucide icon + the name in the Glide header (custom
+  header renderer) and in the detail panel.
+
+## 5. Schema-graph depth-from-focus (separate, smaller)
+- Default the graph to depth 1 from a focused/pinned table instead of dumping
+  all 262 tables; expand neighbors on demand. `get_schema_graph` should take a
+  `rootTable` + `depth` (changelog v0.2.7 / v0.3.1).
+
+Order to build: §1 + §2 (inline counts + FK links) → §4 (header icons, cheap,
+high impact) → §3 (branching breadcrumb) → §5 (graph depth).
