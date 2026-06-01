@@ -20,6 +20,7 @@ import dagre from "dagre";
 import { RefreshCw, AlertTriangle, Key, Link2 } from "lucide-react";
 import { backend, type SchemaGraph, type SchemaGraphNode } from "@/ipc";
 import { useThemeStore } from "@/store/theme";
+import { IconButton, Button, Tooltip } from "@/ui";
 
 interface Props {
   connectionId: string;
@@ -272,9 +273,11 @@ export function SchemaGraphView({ connectionId, schema }: Props) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border bg-bg-secondary px-2">
-        <button className="grid-toolbar-btn" onClick={load} title="Refresh">
-          <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
-        </button>
+        <Tooltip content="Refresh">
+          <IconButton onClick={load} aria-label="Refresh">
+            <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
+          </IconButton>
+        </Tooltip>
         <Link2 size={13} className="text-text-muted" />
         <span className="font-mono text-xs text-text-muted">
           {schema ? `${schema} schema graph` : "schema graph"}
@@ -290,12 +293,9 @@ export function SchemaGraphView({ connectionId, schema }: Props) {
             <AlertTriangle size={22} className="text-danger" />
             <div className="text-md text-text-primary">Could not load schema graph</div>
             <div className="max-w-xl font-mono text-xs text-text-muted">{error}</div>
-            <button
-              className="mt-2 rounded-sm border border-border px-3 py-1 text-sm text-text-secondary hover:bg-bg-hover"
-              onClick={load}
-            >
+            <Button variant="subtle" size="sm" className="mt-2" onClick={load}>
               Retry
-            </button>
+            </Button>
           </div>
         ) : loading && !graph ? (
           <div className="flex h-full items-center justify-center gap-2 text-md text-text-muted">

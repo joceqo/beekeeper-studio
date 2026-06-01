@@ -6,6 +6,7 @@ import { DataGrid } from "@/components/grid/DataGrid";
 import { useTabsStore } from "@/store/tabs";
 import { useThemeStore } from "@/store/theme";
 import { useActivityStore } from "@/store/activity";
+import { Button, IconButton, Tooltip, notify } from "@/ui";
 
 interface Props {
   tabId: string;
@@ -73,6 +74,7 @@ export function QueryEditor({ tabId, sql }: Props) {
     try {
       const r = await backend.executeQuery("mlc-local", sqlRef.current);
       setResult(r);
+      notify.success(`${r.rowCount} rows · ${(r.elapsedMs / 1000).toFixed(2)}s`);
       pushActivity({
         category: "SQL",
         op: r.operation,
@@ -82,6 +84,8 @@ export function QueryEditor({ tabId, sql }: Props) {
         durationMs: r.elapsedMs,
         rows: r.rowCount,
       });
+    } catch (e) {
+      notify.error(e instanceof Error ? e.message : String(e));
     } finally {
       setRunning(false);
     }
@@ -90,17 +94,15 @@ export function QueryEditor({ tabId, sql }: Props) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border bg-bg-secondary px-2">
-        <button
-          onClick={run}
-          disabled={running}
-          className="flex items-center gap-1.5 rounded-sm bg-accent px-2.5 py-1 text-sm font-medium text-text-on-accent hover:bg-accent-hover disabled:opacity-60"
-        >
+        <Button onClick={run} disabled={running} size="sm">
           {running ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
           Run
-        </button>
-        <button className="grid-toolbar-btn" title="Format">
-          <ListTree size={13} />
-        </button>
+        </Button>
+        <Tooltip content="Format">
+          <IconButton aria-label="Format SQL">
+            <ListTree size={13} />
+          </IconButton>
+        </Tooltip>
         <span className="ml-auto text-xs text-text-muted">
           {result ? `${result.rowCount} rows · ${(result.elapsedMs / 1000).toFixed(2)}s` : "ready"}
         </span>

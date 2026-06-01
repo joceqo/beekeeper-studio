@@ -27,6 +27,7 @@ import {
   type RelationColumn,
 } from "@/lib/relations";
 import { useRelationCounts } from "./useRelationCounts";
+import { IconButton, Button, Tooltip } from "@/ui";
 
 interface Props {
   tabId: string;
@@ -199,52 +200,47 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border bg-bg-secondary px-2">
-        <button className="grid-toolbar-btn" onClick={load} title="Refresh">
-          <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
-        </button>
-        <button
-          className="grid-toolbar-btn"
-          title={sort ? `Sorted by ${sort.column} (${sort.direction})` : "Click a column header to sort"}
-        >
-          <ArrowDownUp size={13} className={sort ? "text-accent" : ""} />
-        </button>
+        <Tooltip content="Refresh">
+          <IconButton onClick={load} aria-label="Refresh">
+            <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
+          </IconButton>
+        </Tooltip>
+        <Tooltip content={sort ? `Sorted by ${sort.column} (${sort.direction})` : "Click a column header to sort"}>
+          <IconButton aria-label="Sort">
+            <ArrowDownUp size={13} className={sort ? "text-accent" : ""} />
+          </IconButton>
+        </Tooltip>
         <div className="mx-1 h-4 w-px bg-border" />
-        <button className="grid-toolbar-btn" title="Insert row">
-          <Plus size={13} />
-        </button>
+        <Tooltip content="Insert row">
+          <IconButton aria-label="Insert row">
+            <Plus size={13} />
+          </IconButton>
+        </Tooltip>
         <span className="ml-2 font-mono text-xs text-text-muted">
           {schema}.{table}
         </span>
 
         <div className="ml-auto flex items-center gap-2">
-          <button
-            className="grid-toolbar-btn"
-            title="Previous page"
-            onClick={onPrev}
-            disabled={offset === 0}
-          >
-            <ChevronLeft size={13} className={offset === 0 ? "opacity-30" : ""} />
-          </button>
+          <Tooltip content="Previous page">
+            <IconButton onClick={onPrev} disabled={offset === 0} aria-label="Previous page">
+              <ChevronLeft size={13} className={offset === 0 ? "opacity-30" : ""} />
+            </IconButton>
+          </Tooltip>
           <span className="font-mono text-xs text-text-muted">page {pageNum}</span>
-          <button
-            className="grid-toolbar-btn"
-            title="Next page"
-            onClick={onNext}
-            disabled={!hasNext}
-          >
-            <ChevronRight size={13} className={!hasNext ? "opacity-30" : ""} />
-          </button>
+          <Tooltip content="Next page">
+            <IconButton onClick={onNext} disabled={!hasNext} aria-label="Next page">
+              <ChevronRight size={13} className={!hasNext ? "opacity-30" : ""} />
+            </IconButton>
+          </Tooltip>
           <span className="text-xs text-text-muted">
             {page ? `${page.loaded} loaded · rows ${offset + 1}–${offset + page.loaded}` : "—"}
           </span>
           <div className="mx-1 h-4 w-px bg-border" />
-          <button
-            className="grid-toolbar-btn"
-            title={dockOpen ? "Hide detail panel" : "Show detail panel"}
-            onClick={toggleDock}
-          >
-            {dockOpen ? <PanelRightClose size={13} /> : <PanelRightOpen size={13} />}
-          </button>
+          <Tooltip content={dockOpen ? "Hide detail panel" : "Show detail panel"}>
+            <IconButton onClick={toggleDock} aria-label="Toggle detail panel">
+              {dockOpen ? <PanelRightClose size={13} /> : <PanelRightOpen size={13} />}
+            </IconButton>
+          </Tooltip>
         </div>
       </div>
 
@@ -257,12 +253,9 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
               <AlertTriangle size={22} className="text-danger" />
               <div className="text-md text-text-primary">Could not load records</div>
               <div className="max-w-xl font-mono text-xs text-text-muted">{error}</div>
-              <button
-                className="mt-2 rounded-sm border border-border px-3 py-1 text-sm text-text-secondary hover:bg-bg-hover"
-                onClick={load}
-              >
+              <Button variant="subtle" size="sm" className="mt-2" onClick={load}>
                 Retry
-              </button>
+              </Button>
             </div>
           ) : loading && !page ? (
             <div className="flex h-full items-center justify-center gap-2 text-md text-text-muted">

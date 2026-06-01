@@ -4,7 +4,7 @@ import {
   useActivityStore,
   type ActivityCategory,
 } from "@/store/activity";
-import { cn } from "@/lib/cn";
+import { cn, IconButton, Button, Badge } from "@/ui";
 import { ActivityLogTable } from "./ActivityLogTable";
 
 export function ActivityPanel() {
@@ -40,13 +40,12 @@ export function ActivityPanel() {
       )}
       {/* header / tab bar */}
       <div className="flex h-8 items-center gap-0.5 px-1.5">
-        <button
+        <IconButton
           onClick={toggleCollapsed}
-          className="flex h-6 w-6 items-center justify-center rounded-sm text-text-muted hover:bg-bg-hover hover:text-text-primary"
-          title={collapsed ? "Expand activity" : "Collapse activity"}
+          aria-label={collapsed ? "Expand activity" : "Collapse activity"}
         >
           {collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-        </button>
+        </IconButton>
         <span className="mr-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
           Activity
         </span>
@@ -67,22 +66,24 @@ export function ActivityPanel() {
             >
               {c}
               {count > 0 && (
-                <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[9px] font-semibold text-text-on-accent">
+                <Badge tone="accent" className="rounded-full bg-accent px-1 text-[9px] text-text-on-accent">
                   {count}
-                </span>
+                </Badge>
               )}
               {isActive && <span className="absolute inset-x-1 bottom-0 h-0.5 bg-accent" />}
             </button>
           );
         })}
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
+          className="ml-auto"
           onClick={clear}
-          className="ml-auto flex items-center gap-1 rounded-sm px-2 py-1 text-sm text-text-muted hover:bg-bg-hover hover:text-text-primary"
           title="Clear current category"
         >
           <Trash2 size={12} />
           Clear
-        </button>
+        </Button>
       </div>
 
       {!collapsed && (

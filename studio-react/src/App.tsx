@@ -1,10 +1,10 @@
-import * as Tooltip from "@radix-ui/react-tooltip";
 import { TitleBar } from "@/components/shell/TitleBar";
 import { MainContent } from "@/components/shell/MainContent";
 import { StatusBar } from "@/components/shell/StatusBar";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { ActivityPanel } from "@/components/activity/ActivityPanel";
 import { useSidebarStore } from "@/store/sidebar";
+import { TooltipProvider, Toaster } from "@/ui";
 
 export default function App() {
   const collapsed = useSidebarStore((s) => s.collapsed);
@@ -25,7 +25,7 @@ export default function App() {
   };
 
   return (
-    <Tooltip.Provider delayDuration={300}>
+    <TooltipProvider delay={300}>
       <div className="flex h-screen w-screen flex-col overflow-hidden bg-bg-primary text-text-primary">
         <TitleBar />
 
@@ -51,6 +51,7 @@ export default function App() {
         <ActivityPanel />
         <StatusBar />
       </div>
-    </Tooltip.Provider>
+      <Toaster />
+    </TooltipProvider>
   );
 }

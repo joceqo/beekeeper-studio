@@ -1,6 +1,7 @@
 import { Sun, Moon, Settings } from "lucide-react";
 import { TabStrip } from "./TabStrip";
 import { useThemeStore } from "@/store/theme";
+import { IconButton, Tooltip } from "@/ui";
 
 export function TitleBar() {
   const theme = useThemeStore((s) => s.theme);
@@ -18,19 +19,16 @@ export function TitleBar() {
       <TabStrip />
 
       <div className="flex shrink-0 items-center gap-0.5 px-2">
-        <button
-          onClick={toggle}
-          className="flex h-7 w-7 items-center justify-center rounded-sm text-text-muted hover:bg-bg-hover hover:text-text-primary"
-          title={theme === "dark" ? "Switch to light" : "Switch to dark"}
-        >
-          {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
-        </button>
-        <button
-          className="flex h-7 w-7 items-center justify-center rounded-sm text-text-muted hover:bg-bg-hover hover:text-text-primary"
-          title="Settings"
-        >
-          <Settings size={15} />
-        </button>
+        <Tooltip content={theme === "dark" ? "Switch to light" : "Switch to dark"}>
+          <IconButton size="lg" onClick={toggle} aria-label="Toggle theme">
+            {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+          </IconButton>
+        </Tooltip>
+        <Tooltip content="Settings">
+          <IconButton size="lg" aria-label="Settings">
+            <Settings size={15} />
+          </IconButton>
+        </Tooltip>
       </div>
     </div>
   );

@@ -14,14 +14,14 @@ import {
 import { backend, type Connection, type TableSummary } from "@/ipc";
 import { useSidebarStore } from "@/store/sidebar";
 import { useTabsStore } from "@/store/tabs";
-import { cn } from "@/lib/cn";
+import { cn, IconButton, Tooltip, Badge, type BadgeProps } from "@/ui";
 
-const TAG_CLASS: Record<NonNullable<Connection["tagColor"]>, string> = {
-  danger: "bg-danger/15 text-danger",
-  warning: "bg-warning/15 text-warning",
-  success: "bg-success/15 text-success",
-  info: "bg-info/15 text-info",
-  neutral: "bg-bg-tertiary text-text-secondary",
+const TAG_TONE: Record<NonNullable<Connection["tagColor"]>, BadgeProps["tone"]> = {
+  danger: "danger",
+  warning: "warning",
+  success: "success",
+  info: "info",
+  neutral: "neutral",
 };
 
 function TableIcon({ type }: { type: TableSummary["type"] }) {
@@ -82,18 +82,26 @@ export function Sidebar() {
   if (collapsed) {
     return (
       <div className="flex w-11 shrink-0 flex-col items-center gap-1 border-r border-border bg-bg-secondary py-2">
-        <button className="rail-btn" title="Expand sidebar" onClick={toggle}>
-          <ChevronRight size={16} />
-        </button>
-        <button className="rail-btn" title="Connections">
-          <Database size={16} />
-        </button>
-        <button className="rail-btn" title="Tables">
-          <Table2 size={16} />
-        </button>
-        <button className="rail-btn" title="Search">
-          <Search size={16} />
-        </button>
+        <Tooltip content="Expand sidebar" side="right">
+          <IconButton size="lg" aria-label="Expand sidebar" onClick={toggle}>
+            <ChevronRight size={16} />
+          </IconButton>
+        </Tooltip>
+        <Tooltip content="Connections" side="right">
+          <IconButton size="lg" aria-label="Connections">
+            <Database size={16} />
+          </IconButton>
+        </Tooltip>
+        <Tooltip content="Tables" side="right">
+          <IconButton size="lg" aria-label="Tables">
+            <Table2 size={16} />
+          </IconButton>
+        </Tooltip>
+        <Tooltip content="Search" side="right">
+          <IconButton size="lg" aria-label="Search">
+            <Search size={16} />
+          </IconButton>
+        </Tooltip>
       </div>
     );
   }
@@ -110,12 +118,16 @@ export function Sidebar() {
           Connections
         </span>
         <div className="flex items-center gap-1">
-          <button className="rail-btn h-5 w-5" title="New connection" onClick={openConnection}>
-            <Plus size={13} />
-          </button>
-          <button className="rail-btn h-5 w-5" title="Collapse sidebar" onClick={toggle}>
-            <PanelLeftClose size={13} />
-          </button>
+          <Tooltip content="New connection">
+            <IconButton size="sm" aria-label="New connection" onClick={openConnection}>
+              <Plus size={13} />
+            </IconButton>
+          </Tooltip>
+          <Tooltip content="Collapse sidebar">
+            <IconButton size="sm" aria-label="Collapse sidebar" onClick={toggle}>
+              <PanelLeftClose size={13} />
+            </IconButton>
+          </Tooltip>
         </div>
       </div>
       <div className="px-1.5">
@@ -145,14 +157,9 @@ export function Sidebar() {
                 />
                 <span className="truncate">{c.name}</span>
                 {c.tag && (
-                  <span
-                    className={cn(
-                      "ml-auto rounded-sm px-1 py-px text-xs font-medium",
-                      TAG_CLASS[c.tagColor ?? "neutral"]
-                    )}
-                  >
+                  <Badge tone={TAG_TONE[c.tagColor ?? "neutral"]} className="ml-auto">
                     {c.tag}
-                  </span>
+                  </Badge>
                 )}
                 <span
                   className={cn(
@@ -172,17 +179,19 @@ export function Sidebar() {
         <span className="text-xs font-semibold uppercase tracking-wide text-text-muted">
           Tables
         </span>
-        <button
-          className="rail-btn h-5 w-5"
-          title="Open schema graph"
-          disabled={!activeConnectionId}
-          onClick={() => activeConnectionId && openGraph(activeConnectionId)}
-        >
-          <Workflow size={13} />
-        </button>
+        <Tooltip content="Open schema graph">
+          <IconButton
+            size="sm"
+            aria-label="Open schema graph"
+            disabled={!activeConnectionId}
+            onClick={() => activeConnectionId && openGraph(activeConnectionId)}
+          >
+            <Workflow size={13} />
+          </IconButton>
+        </Tooltip>
       </div>
       <div className="px-2 pb-2">
-        <div className="flex items-center gap-1.5 rounded-sm border border-border bg-bg-primary px-2 py-1">
+        <div className="flex items-center gap-1.5 rounded-sm border border-border bg-bg-primary px-2 py-1 focus-within:border-accent focus-within:ring-1 focus-within:ring-accent/40">
           <Search size={12} className="text-text-muted" />
           <input
             value={search}

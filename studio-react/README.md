@@ -95,14 +95,87 @@ the `mcp-session-id` header), then `tools/call`s `list_saved_connections` /
 - Vite + React 18 + TypeScript
 - Tailwind CSS v4 (`@theme` tokens in `src/index.css`, mapped 1:1 from
   `~/Desktop/records/SlashTable/css/design-tokens.json`)
+- **`@base-ui-components/react`** — headless UI primitives (Select, Menu,
+  Tooltip, Tabs, Switch, ToggleGroup, Popover, Combobox, Dialog), matching
+  SlashTable's actual stack
+- **`class-variance-authority`** + **`clsx`** + **`tailwind-merge`** — variant
+  + class composition for the design-system primitives (`cn()` in `src/lib/cn.ts`)
+- **`sonner`** — toast notifications (`<Toaster/>` mounted once in `App.tsx`)
+- **`vaul`** — drawer/sheet primitive (available via `src/ui/Drawer.tsx`)
 - `@glideapps/glide-data-grid` — the canvas data grid (centerpiece)
 - `@xyflow/react` (+ `dagre` for directed auto-layout) — the schema
   relationship graph (FK edges, cardinality, M2M join-table detection)
 - `@monaco-editor/react` — the SQL editor
-- `@radix-ui/react-*` — tabs / tooltip primitives
 - `lucide-react` — icons
 - Inter Variable / JetBrains Mono Variable (`@fontsource-variable/*`)
 - Zustand — state (tabs, sidebar, theme, activity log, status)
+
+> Radix UI has been removed from the source. Base UI is the headless-primitive
+> layer now. (`@radix-ui/react-dialog` may still appear in `yarn.lock` as a
+> transitive dependency of `vaul`, but nothing in `src/` imports Radix.)
+
+## Design-system primitives (`src/ui/`)
+
+A consistent, token-themed primitive layer (Base UI + cva) sits in
+[`src/ui/`](src/ui) and is the single import surface (`import { … } from "@/ui"`):
+
+| Primitive | Built on | Notes |
+| --- | --- | --- |
+| `Button` | cva | variants `primary / ghost / subtle / danger`, sizes `sm / md` |
+| `IconButton` | cva | square icon button, replaces `.grid-toolbar-btn` / `.rail-btn` |
+| `Input` / `Textarea` | native | token-themed form fields |
+| `Select` | Base UI Select | `items` API, drop-in for native `<select>` |
+| `Combobox` | Base UI Combobox | typeahead filter |
+| `Popover` | Base UI Popover | themed anchored panel |
+| `Menu` / `ContextMenu` | Base UI Menu / ContextMenu | dropdown + right-click, `items` API with icon/kbd/danger |
+| `Tooltip` / `TooltipProvider` | Base UI Tooltip | optional `kbd` shortcut hint via `Kbd` |
+| `Tabs` | Base UI Tabs | underlined tab bar with sliding indicator |
+| `Switch` | Base UI Switch | on/off toggle |
+| `SegmentedControl` | Base UI ToggleGroup | single-select (the AI-access Hidden/Read/Write control) |
+| `Dialog` | Base UI Dialog | modal with backdrop + close |
+| `Drawer` | Vaul | slide-in sheet (bottom/edge) |
+| `Badge` / `Chip` | cva | env tags, relation/filter chips, count pills |
+| `Kbd` | — | keyboard shortcut hint |
+| `Toaster` / `notify` | Sonner | app-root toast host + `toast` re-export |
+
+All are themed off the CSS tokens in `src/index.css` (accent `#d95200`, warm
+neutrals) and respond to the dark/light `[data-theme]` switch.
+
+### Migrated surfaces
+
+These screens now use the `src/ui` primitives instead of raw
+`<button>`/`<select>`/`<input>` or Radix:
+
+- **App root** — `TooltipProvider` + Sonner `Toaster` mounted once
+- **TitleBar** — theme/settings `IconButton`s + `Tooltip`
+- **TabStrip** — close + new-tab `IconButton`s + `Tooltip`
+- **Sidebar** — rail/header `IconButton`s, `Tooltip`s, env-tag `Badge`s
+- **Grid toolbar** (TableView + RelationView) — refresh/sort/insert/paging/dock
+  `IconButton`s + `Tooltip`s, Retry `Button`
+- **FilterBar** — column/operator `Select`s, value `Input`s, add/remove
+  `Button`/`IconButton`s, count `Badge`
+- **DetailPanel** — close `IconButton`, visibility-toggle `Button`
+- **ConnectionScreen** — engine `Tabs`, `Input` fields, AI-access
+  `SegmentedControl`, Connect/Save `Button`s routing through `notify`
+- **QueryEditor** — Run `Button`, format `IconButton`, success/error `notify`
+- **SchemaGraphView** — refresh `IconButton`, Retry `Button`
+- **ActivityPanel** — collapse `IconButton`, Clear `Button`, count `Badge`
+
+### TODO (still on raw elements / not yet migrated)
+
+- The **FilterBar group header** AND·OR combinator and NOT toggle are still
+  styled raw buttons (intentional — they are bespoke pill toggles); could move
+  to a small `Toggle`-based control later.
+- The **DetailPanel format pills** (Text/Number/Currency/…) are bespoke
+  active/inactive bordered buttons; a future `SegmentedControl` or `ToggleGroup`
+  pass could unify them.
+- **Connection / table list rows** in the sidebar remain layout-specific
+  `<button>`s (multi-slot rows with icons, tags, status dots) — fine as-is.
+- **StatusBar** is text-only (no controls to migrate).
+- **Dialog / Drawer / Combobox / Popover / Menu / ContextMenu / Switch** are
+  built and exported but not yet adopted anywhere (no current feature needs
+  them); they are wired and available for upcoming work (settings, command
+  palette, context menus, write-confirm dialogs).
 
 ## What's in the UI
 

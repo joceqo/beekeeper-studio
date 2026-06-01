@@ -30,6 +30,7 @@ import {
   type RelationColumn,
 } from "@/lib/relations";
 import { useRelationCounts } from "./useRelationCounts";
+import { IconButton, Button, Tooltip } from "@/ui";
 
 interface Props {
   tabId: string;
@@ -195,20 +196,20 @@ export function RelationView({ tabId, connectionId, path }: Props) {
         })}
 
         <div className="ml-auto flex items-center gap-2">
-          <button className="grid-toolbar-btn" onClick={load} title="Refresh">
-            <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
-          </button>
+          <Tooltip content="Refresh">
+            <IconButton onClick={load} aria-label="Refresh">
+              <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
+            </IconButton>
+          </Tooltip>
           <span className="text-xs text-text-muted">
             {rows.length} row{rows.length === 1 ? "" : "s"}
           </span>
           <div className="mx-1 h-4 w-px bg-border" />
-          <button
-            className="grid-toolbar-btn"
-            title={dockOpen ? "Hide detail panel" : "Show detail panel"}
-            onClick={toggleDock}
-          >
-            {dockOpen ? <PanelRightClose size={13} /> : <PanelRightOpen size={13} />}
-          </button>
+          <Tooltip content={dockOpen ? "Hide detail panel" : "Show detail panel"}>
+            <IconButton onClick={toggleDock} aria-label="Toggle detail panel">
+              {dockOpen ? <PanelRightClose size={13} /> : <PanelRightOpen size={13} />}
+            </IconButton>
+          </Tooltip>
         </div>
       </div>
 
@@ -221,12 +222,9 @@ export function RelationView({ tabId, connectionId, path }: Props) {
               <AlertTriangle size={22} className="text-danger" />
               <div className="text-md text-text-primary">Could not load related rows</div>
               <div className="max-w-xl font-mono text-xs text-text-muted">{error}</div>
-              <button
-                className="mt-2 rounded-sm border border-border px-3 py-1 text-sm text-text-secondary hover:bg-bg-hover"
-                onClick={load}
-              >
+              <Button variant="subtle" size="sm" className="mt-2" onClick={load}>
                 Retry
-              </button>
+              </Button>
             </div>
           ) : loading && rows.length === 0 ? (
             <div className="flex h-full items-center justify-center gap-2 text-md text-text-muted">

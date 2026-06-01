@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Filter, Plus, FolderPlus, X, Ban } from "lucide-react";
 import type { ColumnDef } from "@/ipc";
+import { Button, IconButton, Input, Select, Badge, cn } from "@/ui";
 import { useFilterStore } from "@/store/filters";
 import {
   LIST_OPS,
@@ -45,32 +46,33 @@ export function FilterBar({ tabId, columns }: Props) {
     <div className="shrink-0 border-b border-border bg-bg-secondary">
       <div className="flex h-8 items-center gap-2 px-2">
         <button
-          className={
-            "flex items-center gap-1.5 rounded-sm px-2 py-1 text-xs " +
-            (activeCount > 0
+          className={cn(
+            "flex items-center gap-1.5 rounded-sm px-2 py-1 text-xs",
+            activeCount > 0
               ? "text-accent hover:bg-bg-hover"
-              : "text-text-muted hover:bg-bg-hover hover:text-text-primary")
-          }
+              : "text-text-muted hover:bg-bg-hover hover:text-text-primary"
+          )}
           onClick={() => setOpen((o) => !o)}
           title="Filter rows"
         >
           <Filter size={13} className={activeCount > 0 ? "fill-current" : ""} />
           <span>Filter</span>
           {activeCount > 0 && (
-            <span className="rounded-full bg-accent px-1.5 text-[10px] font-medium text-text-on-accent">
+            <Badge tone="accent" className="rounded-full bg-accent px-1.5 text-text-on-accent">
               {activeCount}
-            </span>
+            </Badge>
           )}
         </button>
 
         {activeCount > 0 && (
-          <button
-            className="rounded-sm px-2 py-1 text-xs text-text-muted hover:bg-bg-hover hover:text-text-primary"
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => clearAll(tabId)}
             title="Clear all filters"
           >
             Clear
-          </button>
+          </Button>
         )}
 
         {!open && activeCount === 0 && (
@@ -140,28 +142,33 @@ function GroupEditor({
         </span>
 
         <div className="ml-auto flex items-center gap-1">
-          <button
-            className="flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[11px] text-text-muted hover:bg-bg-hover hover:text-text-primary"
+          <Button
+            variant="ghost"
+            size="sm"
+            className="px-1.5 text-[11px]"
             onClick={() => addCondition(tabId, node.id, columns[0]?.name)}
             title="Add condition"
           >
             <Plus size={11} /> Condition
-          </button>
-          <button
-            className="flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[11px] text-text-muted hover:bg-bg-hover hover:text-text-primary"
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="px-1.5 text-[11px]"
             onClick={() => addGroup(tabId, node.id)}
             title="Add nested group"
           >
             <FolderPlus size={11} /> Group
-          </button>
+          </Button>
           {!isRoot && (
-            <button
-              className="rounded-sm p-0.5 text-text-muted hover:bg-bg-hover hover:text-danger"
+            <IconButton
+              variant="danger"
+              size="sm"
               onClick={() => removeNode(tabId, node.id)}
-              title="Remove group"
+              aria-label="Remove group"
             >
               <X size={13} />
-            </button>
+            </IconButton>
           )}
         </div>
       </div>
@@ -214,73 +221,69 @@ function ConditionEditor({
 
   return (
     <div className="flex flex-wrap items-center gap-1.5 rounded-sm bg-bg-primary/30 px-1.5 py-1">
-      <select
-        className="filter-select"
-        value={node.column}
-        onChange={(e) => updateNode(tabId, node.id, { column: e.target.value })}
-      >
-        {!node.column && <option value="">column…</option>}
-        {columns.map((c) => (
-          <option key={c.name} value={c.name}>
-            {c.name}
-          </option>
-        ))}
-      </select>
+      <Select
+        aria-label="Filter column"
+        triggerClassName="min-w-28"
+        placeholder="column…"
+        value={node.column || undefined}
+        onValueChange={(v) => updateNode(tabId, node.id, { column: v })}
+        items={columns.map((c) => ({ value: c.name, label: c.name }))}
+      />
 
-      <select
-        className="filter-select"
+      <Select
+        aria-label="Filter operator"
+        triggerClassName="min-w-28"
         value={node.operator}
-        onChange={(e) =>
-          updateNode(tabId, node.id, { operator: e.target.value as FilterOp })
-        }
-      >
-        {OP_ORDER.map((op) => (
-          <option key={op} value={op}>
-            {OP_LABELS[op]}
-          </option>
-        ))}
-      </select>
+        onValueChange={(v) => updateNode(tabId, node.id, { operator: v as FilterOp })}
+        items={OP_ORDER.map((op) => ({ value: op, label: OP_LABELS[op] }))}
+      />
 
       {showNone ? null : showRange ? (
         <>
-          <input
-            className="filter-input"
+          <Input
+            size="sm"
+            className="min-w-24"
             placeholder="from"
             value={(node.value as string | undefined) ?? ""}
             onChange={(e) => updateNode(tabId, node.id, { value: e.target.value })}
           />
           <span className="text-[11px] text-text-muted">and</span>
-          <input
-            className="filter-input"
+          <Input
+            size="sm"
+            className="min-w-24"
             placeholder="to"
             value={(node.value2 as string | undefined) ?? ""}
             onChange={(e) => updateNode(tabId, node.id, { value2: e.target.value })}
           />
         </>
       ) : showList ? (
-        <input
-          className="filter-input min-w-40"
+        <Input
+          size="sm"
+          className="min-w-40"
           placeholder="a, b, c"
           value={listValue}
           onChange={(e) => updateNode(tabId, node.id, { value: e.target.value })}
           title="Comma-separated values"
         />
       ) : (
-        <input
-          className="filter-input"
+        <Input
+          size="sm"
+          className="min-w-24"
           placeholder="value"
           value={(node.value as string | undefined) ?? ""}
           onChange={(e) => updateNode(tabId, node.id, { value: e.target.value })}
         />
       )}
 
-      <button
-        className="ml-auto rounded-sm p-0.5 text-text-muted hover:bg-bg-hover hover:text-danger"
+      <IconButton
+        variant="danger"
+        size="sm"
+        className="ml-auto"
         onClick={() => removeNode(tabId, node.id)}
-        title="Remove condition"
+        aria-label="Remove condition"
       >
         <X size={13} />
-      </button>
+      </IconButton>
     </div>
   );
 }

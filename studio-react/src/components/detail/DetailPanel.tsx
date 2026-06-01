@@ -7,7 +7,7 @@ import {
   FORMAT_LABELS,
   type ColumnFormat,
 } from "@/store/columnConfig";
-import { cn } from "@/lib/cn";
+import { cn, IconButton, Button } from "@/ui";
 
 interface Props {
   tabId: string;
@@ -71,13 +71,9 @@ export function DetailPanel({
       <span className="text-xs font-semibold uppercase tracking-wide text-text-muted">
         {mode === "column" ? "Column" : mode === "row" ? "Row" : "Details"}
       </span>
-      <button
-        className="grid-toolbar-btn ml-auto"
-        title="Close detail panel"
-        onClick={onClose}
-      >
+      <IconButton className="ml-auto" aria-label="Close detail panel" onClick={onClose}>
         <X size={13} />
-      </button>
+      </IconButton>
     </div>
   );
 
@@ -293,13 +289,15 @@ function ColumnDetail({
       </div>
 
       {/* Visibility toggle. */}
-      <button
+      <Button
+        variant="subtle"
+        size="sm"
+        className="justify-start"
         onClick={() => setHidden(tabId, columnName, !config.hidden)}
-        className="flex items-center gap-2 rounded-sm border border-border px-2 py-1.5 text-sm text-text-secondary hover:bg-bg-hover"
       >
         {config.hidden ? <EyeOff size={13} /> : <Eye size={13} />}
         {config.hidden ? "Hidden in grid — show column" : "Visible — hide column"}
-      </button>
+      </Button>
     </div>
   );
 }

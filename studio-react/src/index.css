@@ -142,54 +142,8 @@ body {
   height: 100%;
 }
 
-/* Shared small button styles used across the chrome. */
-.grid-toolbar-btn {
-  display: flex;
-  height: 1.5rem;
-  width: 1.5rem;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-sm);
-  color: var(--color-text-muted);
-}
-.grid-toolbar-btn:hover {
-  background-color: var(--color-bg-hover);
-  color: var(--color-text-primary);
-}
-
-.rail-btn {
-  display: flex;
-  height: 1.75rem;
-  width: 1.75rem;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-sm);
-  color: var(--color-text-muted);
-}
-.rail-btn:hover {
-  background-color: var(--color-bg-hover);
-  color: var(--color-text-primary);
-}
-
-/* FilterBar inputs/selects, themed to the design tokens. */
-.filter-select,
-.filter-input {
-  height: 1.5rem;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--color-border);
-  background-color: var(--color-bg-primary);
-  color: var(--color-text-primary);
-  font-size: var(--text-sm);
-  padding: 0 0.375rem;
-}
-.filter-input {
-  min-width: 6rem;
-}
-.filter-select:focus,
-.filter-input:focus {
-  outline: none;
-  border-color: var(--color-accent);
-}
+/* Chrome buttons + form controls now live in the src/ui primitives
+ * (IconButton, Button, Input, Select) — no ad-hoc CSS classes needed. */
 
 /* ----------------------------------------------------------------------------
  * React Flow schema graph — themed to the app's design tokens (dark + light).

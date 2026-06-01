@@ -1,6 +1,6 @@
 import { X, Plus, Table2, FileCode, Database, Workflow, Spline } from "lucide-react";
 import { useTabsStore, type Tab } from "@/store/tabs";
-import { cn } from "@/lib/cn";
+import { cn, IconButton, Tooltip } from "@/ui";
 
 function TabIcon({ kind }: { kind: Tab["kind"] }) {
   if (kind === "query") return <FileCode size={12} />;
@@ -40,26 +40,31 @@ export function TabStrip() {
                 <TabIcon kind={t.kind} />
               </span>
               <span className="truncate font-mono">{t.title}</span>
-              <button
+              <IconButton
+                size="sm"
+                aria-label="Close tab"
                 onClick={(e) => {
                   e.stopPropagation();
                   close(t.id);
                 }}
-                className="ml-1 rounded-sm p-0.5 text-text-muted opacity-0 hover:bg-bg-tertiary hover:text-text-primary group-hover:opacity-100"
+                className="ml-1 opacity-0 hover:bg-bg-tertiary group-hover:opacity-100"
               >
                 <X size={12} />
-              </button>
+              </IconButton>
             </div>
           );
         })}
       </div>
-      <button
-        onClick={openQuery}
-        className="flex h-8 w-8 shrink-0 items-center justify-center text-text-muted hover:bg-bg-hover hover:text-text-primary"
-        title="New query tab"
-      >
-        <Plus size={15} />
-      </button>
+      <Tooltip content="New query tab">
+        <IconButton
+          size="lg"
+          onClick={openQuery}
+          aria-label="New query tab"
+          className="h-8 w-8 rounded-none"
+        >
+          <Plus size={15} />
+        </IconButton>
+      </Tooltip>
     </div>
   );
 }
