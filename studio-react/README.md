@@ -125,6 +125,22 @@ the `mcp-session-id` header), then `tools/call`s `list_saved_connections` /
   and back-navigates by clicking any crumb. FK values in the detail panel follow
   the same drilldown. Mock topology: `campaigns.owner_id → users.id`,
   `events.user_id → users.id`, `reports.campaign_id → campaigns.id`.
+- **Nested AND/OR filters** — a collapsible **FilterBar** above the grid (a
+  "Filter" chip with an active-condition count badge + Clear). It edits a per-tab
+  **filter tree**: groups carry an `AND·OR` toggle and a `NOT` negate, and hold
+  conditions or nested groups arbitrarily deep. Each condition is a column select
+  → operator select → value input(s): `equals / not_equals / contains /
+  not_contains / starts_with / ends_with / gt / gte / lt / lte / between` (two
+  inputs) `/ in / not_in` (comma-separated) `/ is_null / is_not_null` (no input).
+  The tree compiles to a read-only SQL `WHERE` (nested parens, `ILIKE` for
+  substring matches with `LIKE` fallback off Postgres, `BETWEEN`, `IN (…)`,
+  `IS [NOT] NULL`) in [`src/lib/filters.ts`](src/lib/filters.ts), composes with
+  the existing sort + paging, and re-drives the same grid via `getRecords`
+  (extended with an optional `where`). State lives per tab in
+  [`useFilterStore`](src/store/filters.ts) (persisted to localStorage). The same
+  engine refines a **drilldown** tab: the FilterBar's WHERE is `AND`-ed onto the
+  crumb's pinned `fk = value` condition. The mock backend honours a useful subset
+  (equals/comparisons/contains/in/null) so the bar visibly filters offline.
 - **Right detail dock** — collapsible + resizable panel docked on the right of
   the grid (toggle in the table toolbar, persisted). Two modes driven by grid
   selection: **Row detail** (select a row) shows a vertical key→value form with
