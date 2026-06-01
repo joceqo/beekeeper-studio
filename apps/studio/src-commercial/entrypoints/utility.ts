@@ -224,6 +224,14 @@ async function startMcpServer() {
     log.info(`MCP server ready at ${url}`);
   } catch (e) {
     mcpServer = null;
-    log.error("Failed to start MCP server", e);
+    const err = e as NodeJS.ErrnoException;
+    if (err?.code === "EADDRINUSE") {
+      log.error(
+        `Failed to start MCP server: port ${mcpConfig.port} is already in use. ` +
+          `Set a different [mcp] port in config.`
+      );
+    } else {
+      log.error(`Failed to start MCP server: ${err?.message ?? e}`, err?.stack ?? "");
+    }
   }
 }

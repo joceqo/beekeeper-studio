@@ -30,8 +30,11 @@ function buildServer(tools: McpTool[], name: string, version: string): McpServer
       tool.name,
       { description: tool.description, inputSchema: tool.inputSchema },
       (async (args: Record<string, unknown>) => {
+        log.info(`tool call: ${tool.name}`, args);
         try {
-          return await tool.handler(args);
+          const result = await tool.handler(args);
+          log.info(`tool ok: ${tool.name}${result.isError ? " (isError)" : ""}`);
+          return result;
         } catch (err) {
           log.warn(`tool ${tool.name} failed`, err);
           return {
@@ -42,6 +45,7 @@ function buildServer(tools: McpTool[], name: string, version: string): McpServer
       }) as unknown as Parameters<typeof server.registerTool>[2]
     );
   }
+  log.info(`registered ${tools.length} MCP tools: ${tools.map((t) => t.name).join(", ")}`);
   return server;
 }
 
@@ -140,10 +144,14 @@ export class BeekeeperMcpServer {
           },
         });
         transport.onclose = () => {
-          if (transport!.sessionId) this.transports.delete(transport!.sessionId);
+          if (transport!.sessionId) {
+            this.transports.delete(transport!.sessionId);
+            log.info(`MCP session closed: ${transport!.sessionId}`);
+          }
         };
         const server = buildServer(this.tools, this.name, this.version);
         await server.connect(transport);
+        log.info("new MCP session initializing");
       }
 
       if (!transport) {
