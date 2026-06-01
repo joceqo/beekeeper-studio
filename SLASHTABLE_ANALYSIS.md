@@ -93,3 +93,75 @@ in the filter bar). Optional Vim mode in the editor.
 - Log panel + drilldown + breadcrumb: `@tanstack/react-table` + `react-virtual`.
 - Keep the BackendClient interface as the seam; M2M detection can live in the
   backend (SQL) or be derived client-side from FK metadata.
+
+---
+
+# Global pass (from the beautified bundle, 184k lines)
+
+The minified bundle was beautified locally (`~/Desktop/records/SlashTable/beautified/`,
+not committed — proprietary). This is the full picture from readable logic +
+the complete Tauri command surface.
+
+## Complete backend API — 85 Tauri `invoke` commands
+
+**Connections/data:** connect, disconnect, reconnect_connection, test_connection,
+list_connections, list_databases, list_schemas, list_tables, describe_table,
+get_records, get_cell_value, execute_query, get_schema_graph,
+get_relation_counts, get_table_stats, get_object_definition,
+refresh_table_description, refresh_materialized_view.
+**Write path (notable):** `preview_changes_sql` + `commit_changes` — pending
+edits are shown as SQL and confirmed before running (write-safety + diff).
+**Saved state:** load/save_saved_connections, delete_saved_connection,
+save/load/delete_folder(s), save_json/load_json, cache_* (offline tab/connection
+result cache: put/load/clear/sweep_orphans).
+**SSH/tools:** check_ssh_agent, test_ssh_tunnel, detect_docker_postgres,
+detect_tools, set_tool_path, set_use_login_shell.
+**Secrets:** authenticate_vault, check_vault_auth, list_vault_items,
+get_vault_item, resolve_vault_secret, resolve_vault_connection_password,
+list_aws_profiles.
+**Neon (branching):** neon_authenticate, neon_discover_projects,
+load_neon_projects/credentials, neon_add_credential, neon_add_projects_to_credential,
+neon_remove_credential, neon_create_branch, neon_delete_branch,
+neon_preview_branches(_for_credential), neon_resolve_branch_credentials,
+neon_set_project_visibility, neon_set_synced_branches, neon_refresh_project.
+**MCP:** start_mcp_server, stop_mcp_server.
+**License (Polar):** activate/deactivate/refresh_license, get_license_info/key,
+exchange_polar_key, dev_set_license.
+**CLI companion:** install_cli, uninstall_cli, get_cli_install_status, cli_respond.
+**Misc:** format_sql, hint_table_navigation, fetch_changelog, log_message,
+set_frontend_log_level, open_config_file/folder, delete_config_file,
+open_local_network_settings, discover_plugins_cmd, ensure_plugins_dir_cmd.
+
+## Cell / semantic types (Glide renderers)
+
+text, number, boolean, json, **image**, url, **relation** (drilldown column),
+email, timestamp, date, **currency**, **percentage**, uuid, markdown. Columns
+carry a semantic type that drives rendering + formatting; relation columns are
+virtual (related rows appear as expandable columns in the grid).
+
+## Credential providers (5)
+
+`onepassword`, `keychain` (macOS), `hashicorp` (Vault), `bitwarden`, `aws` — a
+unified provider/reference model; a connection's password can resolve from any
+of them at connect time (`resolve_vault_connection_password`).
+
+## Stores
+
+`useFilterStore`, `useNeonStore`, `useMcpStore`, `useConfirmStore` (mutation
+confirmation dialogs), `usePromptStore`, and **three separate log stores** —
+`useLogStore` (SQL), `useAppLogStore` (App), `useMcpLogStore` (MCP) — which back
+the Activity panel's category tabs (System/User/Connections likely derived).
+
+## Refined fork priorities (updated)
+
+1. **Relation columns + drilldown** — backend `get_schema_graph` +
+   `get_relation_counts`; render OneToMany/ManyToMany as virtual expandable grid
+   columns (the real SlashTable drilldown, now confirmed in code).
+2. **Right detail panel** — ColumnDetailPanel (stats via `get_table_stats`,
+   format, semantic type, visibility) + RowDetailSection.
+3. **Preview + confirm writes** — `preview_changes_sql` → diff → `commit_changes`
+   (maps to our MCP write guard nicely).
+4. **Schema graph (React Flow) + M2M** — done in studio-react.
+5. **Credential providers** — our MCP/Beekeeper already has keychain; the
+   provider model (1Password/Vault/Bitwarden/AWS) is a larger add.
+6. Neon branching, CLI companion, Polar licensing — out of scope for now.
