@@ -1,8 +1,13 @@
+import os from "os";
 import { z } from "zod";
 import _ from "lodash";
 import { ConnHandlers } from "@commercial/backend/handlers/connHandlers";
-import { allStates, state } from "@/handlers/handlerState";
+import { allStates, newState, state } from "@/handlers/handlerState";
+import { SavedConnection } from "@/common/appdb/models/saved_connection";
 import { checkSqlAccess, GuardDialect, McpAccess } from "./sqlGuard";
+
+/** sId scheme for connections opened by the MCP server itself. */
+const mcpSessionId = (savedConnectionId: number) => `mcp:${savedConnectionId}`;
 
 /** Hard cap on rows returned to an MCP client, regardless of requested limit. */
 const MAX_ROWS = 1000;
@@ -79,6 +84,97 @@ export function createTools(deps: ToolDeps): McpTool[] {
   const { defaultAccess } = deps;
 
   return [
+    {
+      name: "list_saved_connections",
+      description:
+        "List database connections saved in Beekeeper Studio that can be opened with the `connect` " +
+        "tool. These are not necessarily open yet — use `connect` to open one, then `list_connections` " +
+        "to see what is live.",
+      inputSchema: {},
+      async handler() {
+        const saved = await SavedConnection.find({ order: { name: "ASC" } });
+        return ok(
+          saved.map((c) => ({
+            savedConnectionId: c.id,
+            name: c.name,
+            connectionType: c.connectionType,
+            host: c.host ?? null,
+            port: c.port ?? null,
+            database: c.defaultDatabase ?? null,
+            open: !!state(mcpSessionId(c.id))?.connection,
+          }))
+        );
+      },
+    },
+
+    {
+      name: "connect",
+      description:
+        "Open a saved database connection by its savedConnectionId (from list_saved_connections). " +
+        "Connections opened this way are READ-ONLY: only SELECT/WITH/EXPLAIN/SHOW are allowed. " +
+        "Returns the connectionId to pass to the other tools. Safe to call again if already open.",
+      inputSchema: {
+        savedConnectionId: z
+          .number()
+          .int()
+          .describe("Saved connection id from list_saved_connections"),
+      },
+      async handler(args) {
+        const savedId = Number(args.savedConnectionId);
+        const sId = mcpSessionId(savedId);
+
+        // Idempotent: reuse an already-open connection.
+        if (state(sId)?.connection) {
+          return ok({ connectionId: sId, alreadyOpen: true });
+        }
+
+        const config = await SavedConnection.findOneBy({ id: savedId });
+        if (!config) {
+          return fail(`No saved connection with id ${savedId}`);
+        }
+
+        newState(sId);
+        // Force read-only for MCP-opened connections (write support comes later).
+        state(sId).mcpAccess = "read";
+        try {
+          await ConnHandlers["conn/create"]({
+            config,
+            osUser: os.userInfo().username,
+            sId,
+          });
+        } catch (err) {
+          // Roll back the half-initialised state so a retry starts clean.
+          state(sId).connection = null;
+          throw err;
+        }
+        return ok({
+          connectionId: sId,
+          name: config.name,
+          connectionType: config.connectionType,
+          database: state(sId).database ?? config.defaultDatabase ?? null,
+          mcpAccess: "read",
+        });
+      },
+    },
+
+    {
+      name: "disconnect",
+      description: "Close a connection that was opened with the `connect` tool.",
+      inputSchema: {
+        connectionId: z.string().describe("Connection id returned by connect"),
+      },
+      async handler(args) {
+        const sId = String(args.connectionId);
+        const s = state(sId);
+        if (!s?.connection) {
+          return ok({ connectionId: sId, alreadyClosed: true });
+        }
+        await ConnHandlers["conn/disconnect"]({ sId });
+        await ConnHandlers["conn/clearConnection"]({ sId });
+        return ok({ connectionId: sId, closed: true });
+      },
+    },
+
     {
       name: "list_connections",
       description:
