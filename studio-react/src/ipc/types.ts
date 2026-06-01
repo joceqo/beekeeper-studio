@@ -1,0 +1,99 @@
+/**
+ * Shared IPC types. These intentionally mirror the shapes the real Electron
+ * backend already exposes (see SlashTable/Beekeeper MCP tools:
+ * list_connections, list_schemas, list_tables, describe_table,
+ * execute_query, get_records). The mock client and a future MessagePort
+ * client both implement {@link BackendClient} so the UI never changes.
+ */
+
+export interface Connection {
+  id: string;
+  name: string;
+  /** Engine: postgres | mysql | sqlite | sqlserver ... */
+  kind: "postgres" | "mysql" | "sqlite" | "sqlserver";
+  host?: string;
+  /** Human label such as "PRD" rendered as a colored tag. */
+  tag?: string;
+  tagColor?: "danger" | "warning" | "success" | "info" | "neutral";
+  connected: boolean;
+}
+
+export interface Schema {
+  name: string;
+  tableCount: number;
+}
+
+export interface TableSummary {
+  schema: string;
+  name: string;
+  /** "table" | "view" | "materialized-view" */
+  type: "table" | "view" | "materialized-view";
+  rowEstimate: number;
+}
+
+export interface ColumnDef {
+  name: string;
+  dataType: string;
+  nullable: boolean;
+  primaryKey: boolean;
+  default?: string | null;
+}
+
+export interface TableDescription {
+  schema: string;
+  table: string;
+  columns: ColumnDef[];
+  indexes: { name: string; columns: string[]; unique: boolean }[];
+  foreignKeys: { column: string; references: string }[];
+}
+
+export type CellValue = string | number | boolean | null;
+
+export interface RecordPage {
+  columns: ColumnDef[];
+  rows: CellValue[][];
+  /** total rows in the table (estimate) */
+  totalRows: number;
+  /** rows actually fetched into this page */
+  loaded: number;
+  /** wall-clock time the query took, ms */
+  elapsedMs: number;
+}
+
+export interface QueryResult {
+  columns: ColumnDef[];
+  rows: CellValue[][];
+  rowCount: number;
+  elapsedMs: number;
+  /** affected tables, for the activity log */
+  tables: string[];
+  /** detected operation, e.g. SELECT / INSERT */
+  operation: string;
+}
+
+export interface GetRecordsParams {
+  connectionId: string;
+  schema: string;
+  table: string;
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * The single narrow seam between the renderer and the backend.
+ * A real implementation posts each call over a MessagePort
+ * (`$util.send('<handler>', args)`); the mock implementation resolves
+ * canned data. Keep this interface stable.
+ */
+export interface BackendClient {
+  listConnections(): Promise<Connection[]>;
+  listSchemas(connectionId: string): Promise<Schema[]>;
+  listTables(connectionId: string, schema?: string): Promise<TableSummary[]>;
+  describeTable(
+    connectionId: string,
+    table: string,
+    schema?: string
+  ): Promise<TableDescription>;
+  getRecords(params: GetRecordsParams): Promise<RecordPage>;
+  executeQuery(connectionId: string, sql: string): Promise<QueryResult>;
+}
