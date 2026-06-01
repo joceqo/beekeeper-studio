@@ -1,0 +1,274 @@
+// Activity panel
+// -----------------------------
+// A collapsible / resizable dock that sits above the global status bar. All
+// colours read the theme variables so it follows the active theme (and the
+// burnt-orange accent) automatically.
+
+$activity-grid: 104px 86px 60px 116px 150px minmax(160px, 1fr) 70px 60px;
+
+.activity-panel {
+  flex: none;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: $theme-bg;
+  border-top: 1px solid $border-color;
+
+  &.collapsed {
+    height: auto;
+  }
+
+  &.resizing {
+    user-select: none;
+    cursor: ns-resize;
+  }
+
+  .activity-resize-handle {
+    position: absolute;
+    top: -3px;
+    left: 0;
+    right: 0;
+    height: 6px;
+    cursor: ns-resize;
+    z-index: 5;
+    &:hover {
+      background: rgba($theme-primary, 0.4);
+    }
+  }
+}
+
+.activity-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: none;
+  height: 34px;
+  padding-left: $gutter-w * 0.5;
+  padding-right: $gutter-h;
+  border-bottom: 1px solid $border-color;
+  background: rgba($theme-base, 0.02);
+}
+
+// Tab bar
+// -----------------------------
+.activity-tab-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+}
+
+.activity-tabs {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  overflow-x: auto;
+}
+
+.activity-tab {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  height: 100%;
+  padding: 0 0.75rem;
+  border: 0;
+  background: transparent;
+  color: $text-light;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  border-bottom: 2px solid transparent;
+  transition: color 0.12s ease-in-out, border-color 0.12s ease-in-out;
+
+  &:hover {
+    color: $text-dark;
+  }
+
+  &.active {
+    color: $text-dark;
+    border-bottom-color: $theme-primary;
+  }
+}
+
+.activity-tab-badge {
+  display: inline-block;
+  min-width: 16px;
+  padding: 0 0.3rem;
+  border-radius: 1rem;
+  font-size: 0.65rem;
+  line-height: 1.4;
+  text-align: center;
+  color: rgba(black, 0.85);
+  background: $theme-primary;
+}
+
+.activity-tab-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+}
+
+.activity-clear {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.78rem;
+  color: $text-light;
+  .material-icons {
+    font-size: 16px;
+  }
+  &:hover {
+    color: $text-dark;
+  }
+}
+
+.activity-collapse-toggle {
+  flex: none;
+  margin-left: 0.25rem;
+  color: $text-light;
+  &:hover {
+    color: $text-dark;
+  }
+}
+
+// Log table
+// -----------------------------
+.activity-log-table {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.activity-rows {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.activity-empty {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: $text-lighter;
+  font-size: 0.85rem;
+}
+
+.activity-row {
+  display: grid;
+  grid-template-columns: $activity-grid;
+  align-items: start;
+  column-gap: 0.5rem;
+  padding: 0 $gutter-w;
+  font-size: 0.78rem;
+}
+
+.activity-header-row {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  height: 26px;
+  align-items: center;
+  background: $sidebar-bg;
+  color: $text-light;
+  font-weight: 600;
+  text-transform: none;
+  border-bottom: 1px solid $border-color;
+}
+
+.activity-body-row {
+  min-height: 26px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  color: $text;
+  border-bottom: 1px solid rgba($theme-base, 0.04);
+  cursor: pointer;
+
+  &:hover {
+    background: rgba($theme-base, 0.05);
+  }
+
+  &.expanded {
+    background: rgba($theme-primary, 0.06);
+    .col-sql {
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+  }
+}
+
+.activity-cell {
+  line-height: 1.4;
+  &.truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.col-time {
+  font-family: $font-family-mono;
+  color: $text-light;
+}
+.col-op {
+  font-weight: 600;
+  color: $text-dark;
+}
+.col-conn {
+  color: $text;
+}
+.col-sql {
+  font-family: $font-family-mono;
+  color: $text;
+}
+.col-dur,
+.col-rows {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: $text-light;
+}
+
+// Category badges
+// -----------------------------
+.activity-cat-badge {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0 0.4rem;
+  border-radius: 3px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  &.cat-sql {
+    color: $brand-secondary;
+    background: rgba($brand-secondary, 0.16);
+  }
+  &.cat-user {
+    color: $theme-primary;
+    background: rgba($theme-primary, 0.16);
+  }
+  &.cat-mcp {
+    color: $brand-purple;
+    background: rgba($brand-purple, 0.16);
+  }
+  &.cat-app {
+    color: $brand-info;
+    background: rgba($brand-info, 0.16);
+  }
+  &.cat-system {
+    color: $text-light;
+    background: rgba($theme-base, 0.08);
+  }
+  &.cat-connections {
+    color: $brand-success;
+    background: rgba($brand-success, 0.16);
+  }
+}

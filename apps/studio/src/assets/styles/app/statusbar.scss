@@ -16,6 +16,14 @@ $button-height:     $statusbar-height * 0.72;
     height: 100%;
   }
 
+  .status-bar-version {
+    flex: none;
+    padding: 0 $gutter-w;
+    color: rgba($statusbar-text, 0.5);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
   .statusbar {
     height: 100%;
     display: flex;

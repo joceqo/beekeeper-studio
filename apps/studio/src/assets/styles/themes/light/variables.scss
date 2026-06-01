@@ -1,10 +1,10 @@
 @use "sass:color";
 // Theme
 // -----------------------------
-$theme-bg:           #f8f8f8;
-$theme-base:         black;
-$theme-primary:      color.adjust(#fad83b, $lightness: -10%);
-$theme-secondary:    #0099ff;
+$theme-bg:           #f4f2ed;
+$theme-base:         #2a2926;
+$theme-primary:      #b84200;
+$theme-secondary:    #4a8aaa;
 
 // Colors
 // -----------------------------
@@ -16,9 +16,9 @@ $text-hint:          rgba($theme-base, 0.37);
 $text-disabled:      rgba($theme-base, 0.37);
 
 $brand-info:         #3498db;
-$brand-success:      #15db95;
-$brand-warning:      #dc700c;
-$brand-danger:       #ff5d59;
+$brand-success:      #4a8a40;
+$brand-warning:      #c07a25;
+$brand-danger:       #ce4343;
 $brand-default:      rgba($theme-base, 0.57);
 $brand-purple:       #9858ff;
 $brand-pink:         #ff00f0;
@@ -26,7 +26,7 @@ $brand-primary:      $theme-primary;
 $brand-secondary:    $theme-secondary;
 
 // App
-$border-color:              rgba($theme-base, 0.15);
+$border-color:              #d4d0ca;
 $link-color:                $text-dark;
 $placeholder:               $text-hint;
 $selection:                 rgba($theme-primary, 0.2);
@@ -39,7 +39,7 @@ $row-handle-hover:          color.adjust($query-editor-bg, $lightness: -5%);
 
 $titlebar-bg:               transparent;
 $global-sidebar-bg:         transparent;
-$sidebar-bg:                color.adjust($theme-bg, $lightness: -3%);
+$sidebar-bg:                #ecebe7;
 $sidebar-heading-bg:        $theme-bg;
 $tabs-bg:                   transparent;
 $statusbar-bg:              rgba($theme-base, 0.1);

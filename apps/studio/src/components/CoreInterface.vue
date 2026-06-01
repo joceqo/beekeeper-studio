@@ -39,6 +39,7 @@
 
       <secondary-sidebar ref="secondarySidebar" @close="handleToggleOpenSecondarySidebar(false)" />
     </div>
+    <activity-panel v-if="!minimalMode" />
     <global-status-bar
       :connection-button-width="globalPrimarySidebarWidth"
       :connection-button-icon-width="globalSidebarWidth"
@@ -66,6 +67,7 @@
   import ProgressBar from './editor/ProgressBar.vue'
   import LostConnectionModal from './LostConnectionModal.vue'
   import GlobalStatusBar from './GlobalStatusBar.vue'
+  import ActivityPanel from './activity/ActivityPanel.vue'
   import Vue from 'vue'
   import RenameDatabaseElementModal from './common/modals/RenameDatabaseElementModal.vue'
   import PrivacyBanner from '@/components/PrivacyBanner.vue'
@@ -85,7 +87,8 @@
       SecondarySidebar,
       GlobalStatusBar,
       GlobalSidebar,
-      PrivacyBanner
+      PrivacyBanner,
+      ActivityPanel
     },
     data() {
       /* eslint-disable */

@@ -4,6 +4,11 @@
     v-hotkey="keymap"
   >
     <div class="tabs-header">
+      <a
+        class="btn-fab sidebar-toggle"
+        :title="primarySidebarOpen ? 'Hide sidebar' : 'Show sidebar'"
+        @click.prevent="togglePrimarySidebar"
+      ><i class="material-icons">{{ primarySidebarOpen ? 'menu_open' : 'menu' }}</i></a>
       <!-- <div class="nav-tabs nav"> -->
       <Draggable
         :options="dragOptions"
@@ -395,6 +400,7 @@ export default Vue.extend({
     ...mapState(['selectedSidebarItem']),
     ...mapState('tabs', { 'activeTab': 'active', 'tabs': 'tabs' }),
     ...mapState(['connection', 'connectionType', 'usedConfig']),
+    ...mapState('sidebar', ['primarySidebarOpen']),
     ...mapGetters({
        'dialect': 'dialect',
        'dialectData': 'dialectData',
@@ -494,6 +500,9 @@ export default Vue.extend({
     async updateTab(tab: TransportOpenTab) {
       const newTab = Object.assign({}, tab);
       await this.$store.commit('tabs/replaceTab', newTab);
+    },
+    togglePrimarySidebar() {
+      this.trigger(AppEvent.togglePrimarySidebar)
     },
     showUpgradeModal() {
       this.$root.$emit(AppEvent.upgradeModal)

@@ -3,6 +3,7 @@ import Vue from 'vue';
 import { CancelableQuery, DatabaseFilterOptions, ExtendedTableColumn, FilterOptions, NgQueryResult, OrderBy, PrimaryKeyColumn, Routine, SchemaFilterOptions, SupportedFeatures, TableChanges, TableFilter, TableColumn, TableIndex, TableOrView, TablePartition, TableResult, TableProperties, StreamResults, TableInsert, TableTrigger, ImportFuncOptions, FieldDescriptor, FieldEditData, ServerStatistics } from "../db/models";
 import { AlterPartitionsSpec, AlterTableSpec, CreateTableSpec, IndexAlterations, RelationAlterations, TableKey } from "@shared/lib/dialects/models";
 import { IConnection } from "@/common/interfaces/IConnection";
+import { recordSqlActivity } from "@/lib/activity/sqlActivity";
 
 
 export class ElectronUtilityConnectionClient implements IBasicDatabaseClient {
@@ -90,7 +91,10 @@ export class ElectronUtilityConnectionClient implements IBasicDatabaseClient {
     const id = await Vue.prototype.$util.send('conn/query', { queryText, options, tabId, hasActiveTransaction });
     return {
       execute: async () => {
-        return await Vue.prototype.$util.send('query/execute', { queryId: id, isManualCommit: options?.isManualCommit })
+        const start = Date.now()
+        const result = await Vue.prototype.$util.send('query/execute', { queryId: id, isManualCommit: options?.isManualCommit })
+        recordSqlActivity({ category: 'User', sql: queryText, result, durationMs: Date.now() - start })
+        return result
       },
       cancel: async () => {
         return await Vue.prototype.$util.send('query/cancel', { queryId: id })
@@ -111,7 +115,10 @@ export class ElectronUtilityConnectionClient implements IBasicDatabaseClient {
   }
 
   async executeQuery(queryText: string, options?: any): Promise<NgQueryResult[]> {
-    return await Vue.prototype.$util.send('conn/executeQuery', { queryText, options });
+    const start = Date.now()
+    const result = await Vue.prototype.$util.send('conn/executeQuery', { queryText, options });
+    recordSqlActivity({ category: 'SQL', sql: queryText, result, durationMs: Date.now() - start })
+    return result
   }
 
   async listDatabases(filter?: DatabaseFilterOptions): Promise<string[]> {
@@ -239,7 +246,10 @@ export class ElectronUtilityConnectionClient implements IBasicDatabaseClient {
   }
 
   async selectTop(table: string, offset: number, limit: number, orderBy: OrderBy[], filters: string | TableFilter[], schema?: string, selects?: string[], database?: string): Promise<TableResult> {
-    return await Vue.prototype.$util.send('conn/selectTop', { table, offset, limit, orderBy, filters, schema, selects, database });
+    const start = Date.now()
+    const result = await Vue.prototype.$util.send('conn/selectTop', { table, offset, limit, orderBy, filters, schema, selects, database });
+    recordSqlActivity({ category: 'User', op: 'SELECT', tables: schema ? `${schema}.${table}` : table, result, durationMs: Date.now() - start })
+    return result
   }
 
   async selectTopSql(table: string, offset: number, limit: number, orderBy: OrderBy[], filters: string | TableFilter[], schema?: string, selects?: string[]): Promise<string> {

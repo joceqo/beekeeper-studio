@@ -14,6 +14,8 @@ import '@/filters/pretty-bytes-filter'
 import PortalVue from 'portal-vue'
 import 'typeface-roboto'
 import 'typeface-source-code-pro'
+import '@fontsource-variable/inter'
+import '@fontsource-variable/jetbrains-mono'
 import '@/assets/styles/app.scss'
 import $ from 'jquery'
 import store from '@/store/index'
@@ -28,6 +30,7 @@ import { AppEventMixin } from '@/common/AppEvent'
 import BeekeeperPlugin from '@/plugins/BeekeeperPlugin'
 import _ from 'lodash'
 import NotyPlugin from '@/plugins/NotyPlugin'
+import { activityLog } from '@/lib/activity/ActivityLog'
 import '@/common/initializers/big_int_initializer.ts'
 import SettingsPlugin from '@/plugins/SettingsPlugin'
 import rawLog from '@bksLogger'
@@ -55,6 +58,16 @@ import ProductTourPlugin from '@/plugins/ProductTourPlugin'
 
   const log = rawLog.scope("main.ts")
   log.info("starting logging")
+
+  // Funnel framework-light activity entries into the Vuex store. The store
+  // resolves the connection label and keeps the capped ring buffer.
+  activityLog.subscribe((entry) => {
+    try {
+      store.dispatch('activity/record', entry)
+    } catch (e) {
+      log.warn('failed to record activity', e)
+    }
+  })
 
   try {
 

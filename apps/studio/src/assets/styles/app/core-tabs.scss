@@ -36,6 +36,15 @@
     align-items: center;
     background: $tabs-bg;
 
+    .sidebar-toggle {
+      flex: none;
+      margin: 0 0.15rem 0 0.35rem;
+      color: $text-light;
+      &:hover {
+        color: $text-dark;
+      }
+    }
+
     .add-tab-group {
       transition: all 0.2s ease-in-out;
       border: 1px solid transparent;
