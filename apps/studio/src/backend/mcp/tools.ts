@@ -1,10 +1,18 @@
 import os from "os";
 import { z } from "zod";
 import _ from "lodash";
+import rawLog from "@bksLogger";
 import { ConnHandlers } from "@commercial/backend/handlers/connHandlers";
 import { allStates, newState, state } from "@/handlers/handlerState";
 import { SavedConnection } from "@/common/appdb/models/saved_connection";
+import { dialectFor, defaultEscapeString, defaultWrapIdentifier } from "@shared/lib/dialects/models";
+import { getDialectData } from "@shared/lib/dialects";
 import { checkSqlAccess, GuardDialect, McpAccess } from "./sqlGuard";
+
+const log = rawLog.scope("McpTools");
+
+/** Max number of incoming relations counted by get_relation_counts in one call. */
+const MAX_RELATIONS = 50;
 
 /** sId scheme for connections opened by the MCP server itself. */
 const mcpSessionId = (savedConnectionId: number) => `mcp:${savedConnectionId}`;
@@ -60,6 +68,23 @@ export function dialectForConnectionType(connectionType?: string): GuardDialect 
     default:
       return "generic";
   }
+}
+
+/**
+ * Identifier-quoting / value-escaping functions for a Beekeeper connectionType,
+ * resolved from the matching SQL dialect. Falls back to the generic helpers when
+ * the connectionType has no dialect (e.g. NoSQL stores).
+ */
+function quotingForConnectionType(connectionType?: string): {
+  wrapIdentifier: (s: string) => string;
+  escapeString: (s: string, quote?: boolean) => string;
+} {
+  const dialect = connectionType ? dialectFor(connectionType) : null;
+  const data = dialect ? getDialectData(dialect) : null;
+  return {
+    wrapIdentifier: data?.wrapIdentifier ?? defaultWrapIdentifier,
+    escapeString: data?.escapeString ?? defaultEscapeString,
+  };
 }
 
 /** Access level for a connection: explicit override, else the server default. */
@@ -256,7 +281,9 @@ export function createTools(deps: ToolDeps): McpTool[] {
     {
       name: "describe_table",
       description:
-        "Describe a table: columns (name, type, nullable, default), primary key, indexes and foreign keys.",
+        "Describe a table: columns (name, type, nullable, default), primary key, indexes, outgoing " +
+        "foreign keys (this table -> parents), and incoming foreign keys (child tables -> this table). " +
+        "Use incomingForeignKeys with get_relation_counts to drill into related child rows.",
       inputSchema: {
         connectionId: z.string().describe("Connection id from list_connections"),
         table: z.string().describe("Table name"),
@@ -267,11 +294,12 @@ export function createTools(deps: ToolDeps): McpTool[] {
         requireExposed(sId, defaultAccess);
         const table = String(args.table);
         const schema = args.schema ? String(args.schema) : undefined;
-        const [columns, primaryKeys, indexes, keys] = await Promise.all([
+        const [columns, primaryKeys, indexes, outgoingKeys, incomingKeys] = await Promise.all([
           ConnHandlers["conn/listTableColumns"]({ table, schema, sId }),
           ConnHandlers["conn/getPrimaryKeys"]({ table, schema, sId }),
           ConnHandlers["conn/listTableIndexes"]({ table, schema, sId }),
           ConnHandlers["conn/getTableKeys"]({ table, schema, sId }),
+          ConnHandlers["conn/getIncomingKeys"]({ table, schema, sId }),
         ]);
         return ok({
           table,
@@ -284,11 +312,17 @@ export function createTools(deps: ToolDeps): McpTool[] {
           })),
           primaryKey: primaryKeys.map((pk) => pk.columnName),
           indexes: indexes.map((i) => ({ name: i.name, columns: i.columns, unique: i.unique })),
-          foreignKeys: keys.map((k) => ({
+          foreignKeys: outgoingKeys.map((k) => ({
             column: k.fromColumn,
             referencesTable: k.toTable,
             referencesColumn: k.toColumn,
             referencesSchema: k.toSchema,
+          })),
+          incomingForeignKeys: incomingKeys.map((k) => ({
+            fromSchema: k.fromSchema,
+            fromTable: k.fromTable,
+            fromColumn: k.fromColumn,
+            toColumn: k.toColumn,
           })),
         });
       },
@@ -332,6 +366,136 @@ export function createTools(deps: ToolDeps): McpTool[] {
         return ok({
           nodes: tables.map((t) => ({ table: t.name, schema: t.schema })),
           edges,
+        });
+      },
+    },
+
+    {
+      name: "get_relation_counts",
+      description:
+        "Count related child rows for a single parent row. Given a parent table and the primary " +
+        "key of one row (rowKey, as { columnName: value }), this looks up every incoming foreign " +
+        "key (child tables referencing this table) and returns, for each, the number of child rows " +
+        "whose FK column equals the matching rowKey value. Read-only; works on read connections. " +
+        `Caps at ${MAX_RELATIONS} relations per call. Use describe_table.incomingForeignKeys first ` +
+        "to see which relations exist.",
+      inputSchema: {
+        connectionId: z.string().describe("Connection id from list_connections"),
+        table: z.string().describe("Parent table name"),
+        schema: z.string().optional().describe("Schema the parent table belongs to"),
+        rowKey: z
+          .record(z.string(), z.unknown())
+          .describe(
+            "Primary key of one parent row as { columnName: value }. The value is matched against " +
+              "each child FK column referencing that parent column."
+          ),
+      },
+      async handler(args) {
+        const sId = String(args.connectionId);
+        // Read-only by construction (SELECT count(*)); requireExposed already rejects
+        // "none" access, so this works on both read and write connections.
+        const { s } = requireExposed(sId, defaultAccess);
+        const table = String(args.table);
+        const schema = args.schema ? String(args.schema) : undefined;
+        const rowKey = (args.rowKey ?? {}) as Record<string, unknown>;
+        if (!_.isPlainObject(args.rowKey) || Object.keys(rowKey).length === 0) {
+          return fail("rowKey must be a non-empty object of { columnName: value }");
+        }
+
+        const { wrapIdentifier, escapeString } = quotingForConnectionType(
+          s.usedConfig?.connectionType
+        );
+
+        const allIncoming = await ConnHandlers["conn/getIncomingKeys"]({ table, schema, sId });
+        // Only single-column FKs can be matched against a scalar rowKey value.
+        const incoming = allIncoming.filter((k) => !k.isComposite);
+        const skippedComposite = allIncoming.length - incoming.length;
+        if (skippedComposite > 0) {
+          log.info(
+            `get_relation_counts: skipped ${skippedComposite} composite incoming key(s) for ${schema ?? ""}.${table}`
+          );
+        }
+
+        let relations = incoming;
+        let truncated = false;
+        if (relations.length > MAX_RELATIONS) {
+          truncated = true;
+          log.warn(
+            `get_relation_counts: ${relations.length} relations for ${schema ?? ""}.${table}, capping at ${MAX_RELATIONS}`
+          );
+          relations = relations.slice(0, MAX_RELATIONS);
+        }
+
+        const asScalar = (v: string | string[]): string | undefined =>
+          Array.isArray(v) ? v[0] : v;
+
+        const counts = await Promise.all(
+          relations.map(async (k) => {
+            const fromColumn = asScalar(k.fromColumn);
+            const toColumn = asScalar(k.toColumn);
+            const base = {
+              fromSchema: k.fromSchema ?? null,
+              fromTable: k.fromTable,
+              fromColumn,
+              toColumn,
+            };
+            if (!fromColumn || !toColumn) {
+              return { ...base, count: null, error: "Unresolved key column" };
+            }
+            const keyValue = rowKey[toColumn];
+            if (keyValue === undefined) {
+              return {
+                ...base,
+                count: null,
+                error: `rowKey is missing referenced column "${toColumn}"`,
+              };
+            }
+
+            // Safely build SELECT count(*): identifiers are dialect-quoted and the
+            // single scalar value is escaped as a quoted string literal (NULL handled
+            // explicitly). This is a read-only count, run through executeQuery.
+            const qualifiedTable = k.fromSchema
+              ? `${wrapIdentifier(k.fromSchema)}.${wrapIdentifier(k.fromTable)}`
+              : wrapIdentifier(k.fromTable);
+            const col = wrapIdentifier(fromColumn);
+            const predicate =
+              keyValue === null
+                ? `${col} IS NULL`
+                : `${col} = ${escapeString(String(keyValue), true)}`;
+            const sql = `SELECT count(*) AS cnt FROM ${qualifiedTable} WHERE ${predicate}`;
+
+            try {
+              const results = await ConnHandlers["conn/executeQuery"]({
+                queryText: sql,
+                options: {},
+                sId,
+              });
+              const firstRow = (results?.[0]?.rows ?? [])[0] as
+                | Record<string, unknown>
+                | unknown[]
+                | undefined;
+              let raw: unknown;
+              if (Array.isArray(firstRow)) {
+                raw = firstRow[0];
+              } else if (firstRow && typeof firstRow === "object") {
+                raw = (firstRow as Record<string, unknown>).cnt ?? Object.values(firstRow)[0];
+              }
+              const count = raw === undefined || raw === null ? null : Number(raw);
+              return { ...base, count: Number.isNaN(count as number) ? null : count };
+            } catch (err) {
+              log.warn(
+                `get_relation_counts: count failed for ${k.fromTable}.${fromColumn}: ${(err as Error).message}`
+              );
+              return { ...base, count: null, error: (err as Error).message };
+            }
+          })
+        );
+
+        return ok({
+          table,
+          schema: schema ?? null,
+          truncated,
+          relations: counts,
         });
       },
     },
