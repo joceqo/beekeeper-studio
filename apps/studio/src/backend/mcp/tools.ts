@@ -111,31 +111,46 @@ export function createTools(deps: ToolDeps): McpTool[] {
       name: "connect",
       description:
         "Open a saved database connection by its savedConnectionId (from list_saved_connections). " +
-        "Connections opened this way are READ-ONLY: only SELECT/WITH/EXPLAIN/SHOW are allowed. " +
-        "Returns the connectionId to pass to the other tools. Safe to call again if already open.",
+        "Pass access='read' (default) to allow only SELECT/WITH/EXPLAIN/SHOW, or access='write' to " +
+        "allow any SQL including INSERT/UPDATE/DELETE and DDL. Read connections are also opened in the " +
+        "driver's read-only mode (enforced below the SQL guard). Returns the connectionId to pass to " +
+        "the other tools. Idempotent; calling again with a different access reopens the connection.",
       inputSchema: {
         savedConnectionId: z
           .number()
           .int()
           .describe("Saved connection id from list_saved_connections"),
+        access: z
+          .enum(["read", "write"])
+          .optional()
+          .describe("Access level for this connection (default read)"),
       },
       async handler(args) {
         const savedId = Number(args.savedConnectionId);
+        const access: McpAccess = (args.access as McpAccess) ?? "read";
         const sId = mcpSessionId(savedId);
 
-        // Idempotent: reuse an already-open connection.
-        if (state(sId)?.connection) {
-          return ok({ connectionId: sId, alreadyOpen: true });
+        const existing = state(sId);
+        if (existing?.connection) {
+          // Same access → reuse. Different access → reopen (driver read-only
+          // mode is fixed at connect time, so we can't just flip the flag).
+          if (existing.mcpAccess === access) {
+            return ok({ connectionId: sId, alreadyOpen: true, mcpAccess: access });
+          }
+          await ConnHandlers["conn/disconnect"]({ sId });
+          await ConnHandlers["conn/clearConnection"]({ sId });
         }
 
         const config = await SavedConnection.findOneBy({ id: savedId });
         if (!config) {
           return fail(`No saved connection with id ${savedId}`);
         }
+        // Defense in depth: read connections also run in the driver's read-only
+        // mode, which rejects mutating queries below our SQL guard.
+        config.readOnlyMode = access === "read";
 
-        newState(sId);
-        // Force read-only for MCP-opened connections (write support comes later).
-        state(sId).mcpAccess = "read";
+        if (!state(sId)) newState(sId);
+        state(sId).mcpAccess = access;
         try {
           await ConnHandlers["conn/create"]({
             config,
@@ -152,7 +167,7 @@ export function createTools(deps: ToolDeps): McpTool[] {
           name: config.name,
           connectionType: config.connectionType,
           database: state(sId).database ?? config.defaultDatabase ?? null,
-          mcpAccess: "read",
+          mcpAccess: access,
         });
       },
     },
