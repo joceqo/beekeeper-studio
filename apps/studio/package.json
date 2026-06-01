@@ -54,6 +54,7 @@
     "@google-cloud/bigquery": "^6.2.0",
     "@leeoniya/ufuzzy": "^1.0.19",
     "@libsql/knex-libsql": "^0.1.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@mongosh/browser-runtime-electron": "^5.3.4",
     "@mongosh/service-provider-node-driver": "^5.0.8",
     "@octokit/rest": "^21.1.1",

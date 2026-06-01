@@ -419,6 +419,11 @@ declare interface IBksConfig {
             previousPage: string;
         };
     };
+    mcp: {
+        defaultAccess: string;
+        enabled: boolean;
+        port: number;
+    };
     pluginSystem: {
         allow: string[];
         communityDisabled: boolean;
