@@ -38,6 +38,9 @@ import {
 } from '@commercial/backend/plugin-system/modules';
 import bksConfig from '@/common/bksConfig';
 
+import { BeekeeperMcpServer } from '@/backend/mcp/server';
+import type { McpAccess } from '@/backend/mcp/sqlGuard';
+
 import * as sms from 'source-map-support'
 
 if (platformInfo.env.development || platformInfo.env.test) {
@@ -45,6 +48,7 @@ if (platformInfo.env.development || platformInfo.env.test) {
 }
 
 let ormConnection: ORMConnection;
+let mcpServer: BeekeeperMcpServer | null = null;
 const pluginManager = new PluginManager({
   appVersion: platformInfo.appVersion,
   fileManager: new PluginFileManager({
@@ -199,5 +203,27 @@ async function init() {
     log.error("Error initializing driver dep manager", e);
   });
 
+  await startMcpServer();
+
   process.parentPort.postMessage({ type: 'ready' });
+}
+
+async function startMcpServer() {
+  const mcpConfig = bksConfig.mcp;
+  if (!mcpConfig?.enabled) {
+    log.info("MCP server disabled (set [mcp] enabled = true to expose connections)");
+    return;
+  }
+  try {
+    mcpServer = new BeekeeperMcpServer({
+      port: typeof mcpConfig.port === "number" ? mcpConfig.port : 27420,
+      defaultAccess: (mcpConfig.defaultAccess as McpAccess) ?? "read",
+      version: platformInfo.appVersion,
+    });
+    const url = await mcpServer.start();
+    log.info(`MCP server ready at ${url}`);
+  } catch (e) {
+    mcpServer = null;
+    log.error("Failed to start MCP server", e);
+  }
 }

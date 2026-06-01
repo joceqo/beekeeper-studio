@@ -32,6 +32,10 @@ class State {
 
   connectionAbortController: AbortController = null;
 
+  // MCP access level for this connection. "none" hides it from the MCP server.
+  // Defaults are resolved by the MCP server from config when it lists connections.
+  mcpAccess: "none" | "read" | "write" = null;
+
   // enums
   enumsInitialized = false;
 
@@ -55,6 +59,16 @@ export function state(id: string): State {
 
 export function newState(id: string): void {
   states.set(id, new State());
+}
+
+/** Ids of every connection state currently tracked in this process. */
+export function allStateIds(): string[] {
+  return [...states.keys()];
+}
+
+/** Entries of every connection state, for callers that need to enumerate (e.g. MCP). */
+export function allStates(): { sId: string; state: State }[] {
+  return [...states.entries()].map(([sId, state]) => ({ sId, state }));
 }
 
 export async function removeState(id: string): Promise<void> {
