@@ -30,6 +30,7 @@ import { AppEventMixin } from '@/common/AppEvent'
 import BeekeeperPlugin from '@/plugins/BeekeeperPlugin'
 import _ from 'lodash'
 import NotyPlugin from '@/plugins/NotyPlugin'
+import { activityLog } from '@/lib/activity/ActivityLog'
 import '@/common/initializers/big_int_initializer.ts'
 import SettingsPlugin from '@/plugins/SettingsPlugin'
 import rawLog from '@bksLogger'
@@ -57,6 +58,16 @@ import ProductTourPlugin from '@/plugins/ProductTourPlugin'
 
   const log = rawLog.scope("main.ts")
   log.info("starting logging")
+
+  // Funnel framework-light activity entries into the Vuex store. The store
+  // resolves the connection label and keeps the capped ring buffer.
+  activityLog.subscribe((entry) => {
+    try {
+      store.dispatch('activity/record', entry)
+    } catch (e) {
+      log.warn('failed to record activity', e)
+    }
+  })
 
   try {
 
