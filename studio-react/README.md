@@ -113,13 +113,24 @@ the `mcp-session-id` header), then `tools/call`s `list_saved_connections` /
   icon rail.
 - **Data grid** — Glide canvas grid with ~50+ mock rows for `public.users`
   (id / email / username / …), smooth scrolling, NULL styling, typed cells.
+- **Relationship drilldown** (SlashTable's #1 differentiator) — related tables
+  appear as virtual **relation columns** after the real data columns, one per
+  outgoing FK (parent, `N:1`) and one per incoming FK (children, `1:N`),
+  rendered as info-coloured chips (e.g. `▸ campaigns (1:N)`) with a child-row
+  **count** badge when the backend exposes `get_relation_counts`. Clicking a
+  relation chip opens a new **drilldown tab** showing the related rows filtered
+  to that relationship (`SELECT … WHERE fk = <pk>` for children, `pk = <fk>` for
+  parents, via a read-only `executeQuery`), with a clickable **breadcrumb** of
+  the path (`users[42] › campaigns(owner_id)`). Drilldown nests arbitrarily deep
+  and back-navigates by clicking any crumb. FK values in the detail panel follow
+  the same drilldown. Mock topology: `campaigns.owner_id → users.id`,
+  `events.user_id → users.id`, `reports.campaign_id → campaigns.id`.
 - **Right detail dock** — collapsible + resizable panel docked on the right of
   the grid (toggle in the table toolbar, persisted). Two modes driven by grid
   selection: **Row detail** (select a row) shows a vertical key→value form with
   column name / type / value, NULLs styled, and foreign-key values rendered as
-  clickable links (groundwork for relationship drilldown — currently opens the
-  referenced table tab + `console.info`s the target `{table, column, value}`;
-  TODO marks where the full breadcrumb drilldown goes). **Column detail** (click
+  clickable links that trigger the relationship drilldown (open the referenced
+  parent row in a breadcrumbed relation tab). **Column detail** (click
   a header) shows name / type / nullable / PK / FK plus per-column **format**
   options (Text / Number / Currency / Percentage / Thousands) and a
   **visibility** toggle, both stored per column in a Zustand store and applied
@@ -152,9 +163,15 @@ interface BackendClient {
   connect(connectionId): Promise<string>;
   listSchemas(connectionId): Promise<Schema[]>;
   listTables(connectionId, schema?): Promise<TableSummary[]>;
+  // describeTable also returns incomingForeignKeys (child tables referencing
+  // this one) alongside outgoing foreignKeys — drives the 1:N relation columns.
   describeTable(connectionId, table, schema?): Promise<TableDescription>;
   getRecords(params): Promise<RecordPage>;
   executeQuery(connectionId, sql): Promise<QueryResult>;
+  getSchemaGraph(connectionId, schema?): Promise<SchemaGraph>;
+  // Best-effort related-row counts for relation chips; resolves to [] when the
+  // backend's get_relation_counts tool is unavailable (graceful degradation).
+  getRelationCounts(params): Promise<RelationCount[]>;
 }
 ```
 

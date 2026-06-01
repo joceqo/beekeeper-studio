@@ -4,8 +4,10 @@ import type {
   ColumnDef,
   Connection,
   GetRecordsParams,
+  GetRelationCountsParams,
   QueryResult,
   RecordPage,
+  RelationCount,
   Schema,
   SchemaGraph,
   TableDescription,
@@ -64,6 +66,13 @@ interface DescribeTableDTO {
     referencesTable: string;
     referencesColumn: string;
     referencesSchema: string | null;
+  }[];
+  /** Child tables that reference this table (1:N). Added alongside foreignKeys. */
+  incomingForeignKeys?: {
+    fromSchema: string | null;
+    fromTable: string;
+    fromColumn: string;
+    toColumn: string;
   }[];
 }
 
@@ -339,7 +348,48 @@ export class McpBackendClient implements BackendClient {
         column: k.column,
         references: `${k.referencesSchema ? `${k.referencesSchema}.` : ""}${k.referencesTable}(${k.referencesColumn})`,
       })),
+      incomingForeignKeys: (dto.incomingForeignKeys ?? []).map((k) => ({
+        fromSchema: k.fromSchema ?? dto.schema ?? schema ?? "public",
+        fromTable: k.fromTable,
+        fromColumn: k.fromColumn,
+        toColumn: k.toColumn,
+      })),
     };
+  }
+
+  async getRelationCounts(params: GetRelationCountsParams): Promise<RelationCount[]> {
+    // Best-effort: the get_relation_counts tool may not exist on every backend
+    // build. On any error (unknown tool, RPC failure) degrade to no counts.
+    try {
+      const live = await this.resolveConnection(params.connectionId);
+      // The backend tool returns { table, schema, truncated, relations: [...] }.
+      const raw = await this.callTool<{
+        relations?: {
+          fromSchema: string | null;
+          fromTable: string;
+          fromColumn?: string;
+          toColumn?: string;
+          count: number | null;
+          error?: string;
+        }[];
+      }>("get_relation_counts", {
+        connectionId: live,
+        table: params.table,
+        ...(params.schema ? { schema: params.schema } : {}),
+        rowKey: params.rowKey,
+      });
+      return (raw?.relations ?? [])
+        .filter((r) => r.count != null && r.fromColumn && r.toColumn)
+        .map((r) => ({
+          fromSchema: r.fromSchema ?? params.schema ?? "public",
+          fromTable: r.fromTable,
+          fromColumn: r.fromColumn as string,
+          toColumn: r.toColumn as string,
+          count: r.count as number,
+        }));
+    } catch {
+      return [];
+    }
   }
 
   async getRecords(params: GetRecordsParams): Promise<RecordPage> {

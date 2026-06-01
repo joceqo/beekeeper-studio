@@ -1,5 +1,6 @@
 import { useTabsStore } from "@/store/tabs";
 import { TableView } from "@/components/grid/TableView";
+import { RelationView } from "@/components/grid/RelationView";
 import { SchemaGraphView } from "@/components/grid/SchemaGraphView";
 import { QueryEditor } from "@/components/editor/QueryEditor";
 import { ConnectionScreen } from "@/components/connection/ConnectionScreen";
@@ -25,6 +26,17 @@ export function MainContent() {
         connectionId={tab.connectionId!}
         schema={tab.schema!}
         table={tab.table!}
+      />
+    );
+  }
+
+  if (tab.kind === "relation") {
+    return (
+      <RelationView
+        key={tab.id}
+        tabId={tab.id}
+        connectionId={tab.connectionId!}
+        path={tab.path ?? []}
       />
     );
   }

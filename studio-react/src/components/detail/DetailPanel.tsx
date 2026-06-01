@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { KeyRound, Link2, Eye, EyeOff, X } from "lucide-react";
 import type { CellValue, ColumnDef, TableDescription } from "@/ipc";
-import { useTabsStore } from "@/store/tabs";
+import { useTabsStore, type DrilldownCrumb } from "@/store/tabs";
 import {
   useColumnConfigStore,
   FORMAT_LABELS,
@@ -12,6 +12,9 @@ import { cn } from "@/lib/cn";
 interface Props {
   tabId: string;
   connectionId: string;
+  /** Source schema/table this panel describes, for accurate drilldown crumbs. */
+  schema?: string;
+  table?: string;
   columns: ColumnDef[];
   row: CellValue[] | null;
   /** index of the selected row in the page (for the header label) */
@@ -45,6 +48,8 @@ function NullValue() {
 export function DetailPanel({
   tabId,
   connectionId,
+  schema,
+  table,
   columns,
   row,
   rowIndex,
@@ -54,7 +59,12 @@ export function DetailPanel({
   onClose,
 }: Props) {
   const openTable = useTabsStore((s) => s.openTable);
+  const openRelation = useTabsStore((s) => s.openRelation);
   const fks = useMemo(() => fkMap(description), [description]);
+
+  // Find this row's PK value, to anchor the breadcrumb origin crumb.
+  const pkIndex = columns.findIndex((c) => c.primaryKey);
+  const originKey = row && pkIndex >= 0 ? row[pkIndex] : null;
 
   const header = (
     <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border bg-bg-secondary px-3">
@@ -85,12 +95,31 @@ export function DetailPanel({
   } else if (mode === "row" && row) {
     body = (
       <RowDetail
-        connectionId={connectionId}
         columns={columns}
         row={row}
         rowIndex={rowIndex}
         fks={fks}
-        onOpenRelated={openTable}
+        onFollowFk={(parsed, value) => {
+          // Parent (N:1) drilldown: filter the referenced table to PK = value,
+          // with a breadcrumb anchored at this source row.
+          const origin: DrilldownCrumb = {
+            schema: schema ?? "public",
+            table: table ?? "",
+            sourceKey: originKey as string | number | undefined,
+            sourceTable: table,
+          };
+          const crumb: DrilldownCrumb = {
+            schema: parsed.schema ?? schema ?? "public",
+            table: parsed.table,
+            filterColumn: parsed.column,
+            filterValue: value as string | number,
+            relation: "outgoing",
+            sourceKey: value as string | number,
+            sourceTable: table,
+          };
+          if (table) openRelation(connectionId, [origin], crumb);
+          else openTable(connectionId, parsed.schema ?? "public", parsed.table);
+        }}
       />
     );
   } else {
@@ -112,19 +141,20 @@ export function DetailPanel({
 // --- Row detail (key -> value form) ----------------------------------------
 
 function RowDetail({
-  connectionId,
   columns,
   row,
   rowIndex,
   fks,
-  onOpenRelated,
+  onFollowFk,
 }: {
-  connectionId: string;
   columns: ColumnDef[];
   row: CellValue[];
   rowIndex: number | null;
   fks: Map<string, string>;
-  onOpenRelated: (connectionId: string, schema: string, table: string) => void;
+  onFollowFk: (
+    parsed: { schema?: string; table: string; column: string },
+    value: CellValue
+  ) => void;
 }) {
   return (
     <div className="flex flex-col">
@@ -150,12 +180,7 @@ function RowDetail({
                 {value === null || value === undefined ? (
                   <NullValue />
                 ) : ref ? (
-                  <FkLink
-                    value={value}
-                    reference={ref}
-                    connectionId={connectionId}
-                    onOpenRelated={onOpenRelated}
-                  />
+                  <FkLink value={value} reference={ref} onFollowFk={onFollowFk} />
                 ) : (
                   String(value)
                 )}
@@ -171,13 +196,14 @@ function RowDetail({
 function FkLink({
   value,
   reference,
-  connectionId,
-  onOpenRelated,
+  onFollowFk,
 }: {
   value: CellValue;
   reference: string;
-  connectionId: string;
-  onOpenRelated: (connectionId: string, schema: string, table: string) => void;
+  onFollowFk: (
+    parsed: { schema?: string; table: string; column: string },
+    value: CellValue
+  ) => void;
 }) {
   const parsed = parseRef(reference);
   return (
@@ -185,17 +211,9 @@ function FkLink({
       className="inline-flex items-center gap-1 text-left text-info underline decoration-dotted underline-offset-2 hover:text-accent"
       title={`Follow ${reference}`}
       onClick={() => {
-        // TODO: full breadcrumb relationship drilldown — push a breadcrumb entry
-        // and filter the referenced table to `column = value` instead of just
-        // opening the whole table. For now, open the referenced table tab.
-        if (parsed) {
-          console.info("FK drilldown target", {
-            table: parsed.table,
-            column: parsed.column,
-            value,
-          });
-          onOpenRelated(connectionId, parsed.schema ?? "public", parsed.table);
-        }
+        // Breadcrumb relationship drilldown: filter the referenced (parent)
+        // table to `column = value` in a new relation tab.
+        if (parsed) onFollowFk(parsed, value);
       }}
     >
       {String(value)}

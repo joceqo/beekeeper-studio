@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   RefreshCw,
   Filter,
@@ -17,6 +17,14 @@ import { useActivityStore } from "@/store/activity";
 import { useStatusStore } from "@/store/status";
 import { useSelectionStore } from "@/store/selection";
 import { useDetailDockStore } from "@/store/detailDock";
+import { useTabsStore, type DrilldownCrumb } from "@/store/tabs";
+import {
+  relationColumns,
+  localValue,
+  buildCrumb,
+  type RelationColumn,
+} from "@/lib/relations";
+import { useRelationCounts } from "./useRelationCounts";
 
 interface Props {
   tabId: string;
@@ -50,6 +58,13 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
   const toggleDock = useDetailDockStore((s) => s.toggle);
   const dockWidth = useDetailDockStore((s) => s.width);
   const setDockWidth = useDetailDockStore((s) => s.setWidth);
+  const openRelation = useTabsStore((s) => s.openRelation);
+
+  // Virtual relation columns (outgoing parents + incoming children).
+  const relations = useMemo<RelationColumn[]>(
+    () => relationColumns(description),
+    [description]
+  );
 
   const load = useCallback(() => {
     setLoading(true);
@@ -129,6 +144,44 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
 
   const selectedRow =
     page && selection.rowIndex != null ? page.rows[selection.rowIndex] ?? null : null;
+
+  // Fetch relation chip counts for the selected row (best-effort, cached).
+  const countRowIndices = useMemo(
+    () => (selection.rowIndex != null ? [selection.rowIndex] : []),
+    [selection.rowIndex]
+  );
+  const relationCounts = useRelationCounts({
+    connectionId,
+    schema,
+    table,
+    columns: page?.columns ?? [],
+    rows: page?.rows ?? [],
+    relations,
+    rowIndices: countRowIndices,
+  });
+
+  // Drill into related rows: open a new relation tab with a breadcrumb path.
+  const onRelationClick = useCallback(
+    (rowIndex: number, rel: RelationColumn) => {
+      if (!page) return;
+      const row = page.rows[rowIndex];
+      if (!row) return;
+      const sourceKey = localValue(rel, page.columns, row);
+      const crumb = buildCrumb(rel, table, sourceKey);
+      if (!crumb) return;
+      // Origin crumb (this row) + the followed hop.
+      const pkIdx = page.columns.findIndex((c) => c.primaryKey);
+      const originKey = pkIdx >= 0 ? row[pkIdx] : sourceKey;
+      const origin: DrilldownCrumb = {
+        schema,
+        table,
+        sourceKey: originKey as string | number,
+        sourceTable: table,
+      };
+      openRelation(connectionId, [origin], crumb);
+    },
+    [page, table, schema, connectionId, openRelation]
+  );
 
   return (
     <div className="flex h-full flex-col">
@@ -220,6 +273,9 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
               onSort={onSort}
               onRowSelect={(i) => selectRow(tabId, i)}
               onColumnSelect={(name) => selectColumn(tabId, name)}
+              relations={relations}
+              relationCounts={relationCounts}
+              onRelationClick={onRelationClick}
             />
           ) : null}
         </div>
@@ -234,6 +290,8 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
               <DetailPanel
                 tabId={tabId}
                 connectionId={connectionId}
+                schema={schema}
+                table={table}
                 columns={page?.columns ?? []}
                 row={selectedRow}
                 rowIndex={selection.rowIndex}

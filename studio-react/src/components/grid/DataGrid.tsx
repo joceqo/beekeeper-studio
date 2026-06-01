@@ -9,6 +9,7 @@ import DataEditor, {
 } from "@glideapps/glide-data-grid";
 import "@glideapps/glide-data-grid/dist/index.css";
 import type { CellValue, ColumnDef } from "@/ipc";
+import type { RelationColumn } from "@/lib/relations";
 import { useThemeStore } from "@/store/theme";
 import { useColumnConfigStore, formatCellValue } from "@/store/columnConfig";
 
@@ -102,7 +103,15 @@ export interface DataGridProps {
   onRowSelect?: (rowIndex: number | null) => void;
   /** Fired with the focused column name, or null when cleared. */
   onColumnSelect?: (columnName: string | null) => void;
+  /** Virtual relation columns appended after the real data columns. */
+  relations?: RelationColumn[];
+  /** Per-row, per-relation child counts: rowIndex -> (relationId -> count). */
+  relationCounts?: Map<number, Map<string, number>>;
+  /** Fired when a relation chip is clicked, to drill into related rows. */
+  onRelationClick?: (rowIndex: number, relation: RelationColumn) => void;
 }
+
+const REL_COL_PREFIX = "__rel__:";
 
 export function DataGrid({
   tabId,
@@ -112,6 +121,9 @@ export function DataGrid({
   onSort,
   onRowSelect,
   onColumnSelect,
+  relations = [],
+  relationCounts,
+  onRelationClick,
 }: DataGridProps) {
   // re-derive theme when app theme flips
   const theme = useThemeStore((s) => s.theme);
@@ -133,22 +145,56 @@ export function DataGrid({
     [columns, columnConfig]
   );
 
-  const gridColumns = useMemo<GridColumn[]>(
-    () =>
-      visible.map(({ c }) => {
-        const arrow = sort?.column === c.name ? (sort.direction === "asc" ? " ↑" : " ↓") : "";
-        return {
-          title: c.name + arrow,
-          id: c.name,
-          width: colWidth(c),
-          icon: c.primaryKey ? "headerRowID" : undefined,
-        };
-      }),
-    [visible, sort]
-  );
+  const gridColumns = useMemo<GridColumn[]>(() => {
+    const dataCols: GridColumn[] = visible.map(({ c }) => {
+      const arrow = sort?.column === c.name ? (sort.direction === "asc" ? " ↑" : " ↓") : "";
+      return {
+        title: c.name + arrow,
+        id: c.name,
+        width: colWidth(c),
+        icon: c.primaryKey ? "headerRowID" : undefined,
+      };
+    });
+    // Relation columns are appended after the real data columns and visually
+    // tagged with their cardinality (N:1 / 1:N) + a group, so they read as
+    // navigation affordances rather than data.
+    const relCols: GridColumn[] = relations.map((r) => ({
+      title: `${r.cardinality === "1:N" ? "▸ " : "▴ "}${r.targetTable} (${r.cardinality})`,
+      id: REL_COL_PREFIX + r.id,
+      width: 160,
+      themeOverride: {
+        textHeader: token("--color-info"),
+        bgHeader: token("--color-bg-surface"),
+      },
+    }));
+    return [...dataCols, ...relCols];
+  }, [visible, sort, relations]);
 
   const getCellContent = useCallback(
     ([col, row]: Item): GridCell => {
+      // Relation columns live after the real data columns.
+      if (col >= visible.length) {
+        const rel = relations[col - visible.length];
+        if (rel) {
+          const count = relationCounts?.get(row)?.get(rel.id);
+          const label =
+            rel.direction === "incoming"
+              ? count != null
+                ? `${rel.targetTable} · ${count}`
+                : rel.targetTable
+              : rel.targetTable;
+          return {
+            kind: GridCellKind.Bubble,
+            data: [label],
+            allowOverlay: false,
+            themeOverride: {
+              textBubble: token("--color-info"),
+              bgBubble: token("--color-bg-surface"),
+            },
+          };
+        }
+      }
+
       const mapped = visible[col];
       const def = mapped?.c;
       const raw = mapped ? rows[row]?.[mapped.originalIndex] : undefined;
@@ -193,17 +239,28 @@ export function DataGrid({
         allowOverlay: true,
       };
     },
-    [visible, rows, columnConfig]
+    [visible, rows, columnConfig, relations, relationCounts]
   );
 
   const onHeaderClicked = useCallback(
     (colIndex: number) => {
+      // Relation columns aren't sortable data columns; ignore header clicks.
+      if (colIndex >= visible.length) return;
       const def = visible[colIndex]?.c;
       if (!def) return;
       onColumnSelect?.(def.name);
       if (onSort) onSort(def.name);
     },
     [visible, onSort, onColumnSelect]
+  );
+
+  const onCellClicked = useCallback(
+    ([col, row]: Item) => {
+      if (col < visible.length) return;
+      const rel = relations[col - visible.length];
+      if (rel) onRelationClick?.(row, rel);
+    },
+    [visible.length, relations, onRelationClick]
   );
 
   const onGridSelectionChange = useCallback(
@@ -234,6 +291,7 @@ export function DataGrid({
         height="100%"
         getCellsForSelection
         onHeaderClicked={onHeaderClicked}
+        onCellClicked={onCellClicked}
         onGridSelectionChange={onGridSelectionChange}
         keybindings={{ search: true }}
       />

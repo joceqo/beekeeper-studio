@@ -1,17 +1,42 @@
 import { create } from "zustand";
 
-export type TabKind = "table" | "query" | "connection" | "graph";
+export type TabKind = "table" | "query" | "connection" | "graph" | "relation";
+
+/** Relationship direction for a drilldown step. */
+export type RelationKind = "incoming" | "outgoing";
+
+/**
+ * One hop in a relationship drilldown path. The first crumb is the origin row
+ * (no relation); each subsequent crumb records the relation followed and the
+ * filter applied to the target table.
+ */
+export interface DrilldownCrumb {
+  /** Target schema/table this crumb lands on. */
+  schema: string;
+  table: string;
+  /** Filter applied to this target table, embedded in the drilldown query. */
+  filterColumn?: string;
+  filterValue?: string | number;
+  /** "incoming" = children (1:N), "outgoing" = parent (N:1). */
+  relation?: RelationKind;
+  /** Source row's primary-key value, shown as `table[pk]` in the crumb label. */
+  sourceKey?: string | number;
+  /** Source table the relation was followed *from*. */
+  sourceTable?: string;
+}
 
 export interface Tab {
   id: string;
   kind: TabKind;
   title: string;
-  /** for table tabs */
+  /** for table + relation tabs */
   schema?: string;
   table?: string;
   connectionId?: string;
   /** for query tabs, persisted editor text */
   sql?: string;
+  /** for relation (drilldown) tabs: the breadcrumb path of hops. */
+  path?: DrilldownCrumb[];
 }
 
 interface TabsState {
@@ -21,6 +46,17 @@ interface TabsState {
   openQuery: () => void;
   openConnection: () => void;
   openGraph: (connectionId: string, schema?: string) => void;
+  /**
+   * Open (or focus) a relationship drilldown tab. `parentPath` is the breadcrumb
+   * leading up to this hop (empty for a first drilldown). `crumb` is the new hop.
+   */
+  openRelation: (
+    connectionId: string,
+    parentPath: DrilldownCrumb[],
+    crumb: DrilldownCrumb
+  ) => void;
+  /** Truncate a relation tab's path to `index` (inclusive) — breadcrumb back-nav. */
+  navigateCrumb: (tabId: string, index: number) => void;
   setActive: (id: string) => void;
   close: (id: string) => void;
   updateSql: (id: string, sql: string) => void;
@@ -102,6 +138,45 @@ export const useTabsStore = create<TabsState>((set, get) => ({
     };
     set((s) => ({ tabs: [...s.tabs, tab], activeId: tab.id }));
   },
+
+  openRelation: (connectionId, parentPath, crumb) => {
+    const path = [...parentPath, crumb];
+    // Dedupe by the full path signature so re-clicking focuses the same tab.
+    const sig = JSON.stringify(path);
+    const existing = get().tabs.find(
+      (t) => t.kind === "relation" && t.connectionId === connectionId && JSON.stringify(t.path) === sig
+    );
+    if (existing) {
+      set({ activeId: existing.id });
+      return;
+    }
+    const title = `${crumb.table}`;
+    const tab: Tab = {
+      id: nextId("rel"),
+      kind: "relation",
+      title,
+      schema: crumb.schema,
+      table: crumb.table,
+      connectionId,
+      path,
+    };
+    set((s) => ({ tabs: [...s.tabs, tab], activeId: tab.id }));
+  },
+
+  navigateCrumb: (tabId, index) =>
+    set((s) => {
+      const tab = s.tabs.find((t) => t.id === tabId);
+      if (!tab || !tab.path || index >= tab.path.length - 1) return s;
+      const path = tab.path.slice(0, index + 1);
+      const last = path[path.length - 1];
+      return {
+        tabs: s.tabs.map((t) =>
+          t.id === tabId
+            ? { ...t, path, schema: last.schema, table: last.table, title: last.table }
+            : t
+        ),
+      };
+    }),
 
   setActive: (id) => set({ activeId: id }),
 

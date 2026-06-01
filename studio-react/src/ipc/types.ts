@@ -39,12 +39,51 @@ export interface ColumnDef {
   default?: string | null;
 }
 
+/**
+ * An incoming foreign key: a child table that references this table. Drives the
+ * "1:N" (OneToMany) relation columns in the grid and child drilldown.
+ */
+export interface IncomingForeignKey {
+  /** Schema of the referencing (child) table. */
+  fromSchema: string;
+  /** The referencing (child) table. */
+  fromTable: string;
+  /** The FK column on the child table. */
+  fromColumn: string;
+  /** The column on *this* table the FK points at (usually the PK). */
+  toColumn: string;
+}
+
 export interface TableDescription {
   schema: string;
   table: string;
   columns: ColumnDef[];
   indexes: { name: string; columns: string[]; unique: boolean }[];
+  /** Outgoing FKs: columns on this table that point at a parent (N:1). */
   foreignKeys: { column: string; references: string }[];
+  /** Incoming FKs: child tables that reference this table (1:N). */
+  incomingForeignKeys: IncomingForeignKey[];
+}
+
+/**
+ * A per-relationship row count for a single source row, keyed by the same
+ * fields as an incoming FK. Optional/best-effort: if the backend tool is
+ * unavailable the UI simply renders relation chips without a count.
+ */
+export interface RelationCount {
+  fromSchema: string;
+  fromTable: string;
+  fromColumn: string;
+  toColumn: string;
+  count: number;
+}
+
+export interface GetRelationCountsParams {
+  connectionId: string;
+  table: string;
+  schema?: string;
+  /** PK value of the source row whose related counts we want. */
+  rowKey: CellValue;
 }
 
 export type CellValue = string | number | boolean | null;
@@ -129,4 +168,11 @@ export interface BackendClient {
   getRecords(params: GetRecordsParams): Promise<RecordPage>;
   executeQuery(connectionId: string, sql: string): Promise<QueryResult>;
   getSchemaGraph(connectionId: string, schema?: string): Promise<SchemaGraph>;
+  /**
+   * Best-effort related-row counts for a single source row, used to badge the
+   * relation columns in the grid. Implementations should resolve to `[]` (not
+   * reject) when the underlying tool is unavailable so the grid degrades
+   * gracefully to count-less chips.
+   */
+  getRelationCounts(params: GetRelationCountsParams): Promise<RelationCount[]>;
 }
