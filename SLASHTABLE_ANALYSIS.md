@@ -165,3 +165,44 @@ the Activity panel's category tabs (System/User/Connections likely derived).
 5. **Credential providers** — our MCP/Beekeeper already has keychain; the
    provider model (1Password/Vault/Bitwarden/AWS) is a larger add.
 6. Neon branching, CLI companion, Polar licensing — out of scope for now.
+
+---
+
+# Filter system spec (for the studio-react nested-filter feature, step #3)
+
+From the bundle: filters are a **tree** of nodes edited in a `FilterBar` /
+`FilterBlockEditor`, with `isGroup`, a combinator, `negate`, and `children`.
+Blocks can be saved per tab (`savedFilterBlocks`), promoted, toggled, cleared.
+
+**Node model (proposed for studio-react):**
+```ts
+type FilterNode =
+  | { id: string; kind: "group"; combinator: "AND" | "OR"; negate?: boolean; children: FilterNode[] }
+  | { id: string; kind: "condition"; column: string; operator: FilterOp; value?: unknown; value2?: unknown };
+
+type FilterOp =
+  | "equals" | "not_equals"
+  | "contains" | "not_contains" | "starts_with" | "ends_with"
+  | "gt" | "gte" | "lt" | "lte"
+  | "between"            // uses value + value2
+  | "in" | "not_in"      // value = array
+  | "is_null" | "is_not_null";  // no value
+```
+
+**Compile to SQL** (read-only WHERE): recurse the tree → groups become
+`(child AND/OR child …)`, optional `NOT (...)` when `negate`; conditions map to
+`col = $v`, `col ILIKE '%v%'`, `col BETWEEN a AND b`, `col IN (…)`,
+`col IS [NOT] NULL`, etc. Quote identifiers per dialect; escape/parameterize
+values (reuse the backend escaping the MCP `get_relation_counts` tool already
+uses, or pass the WHERE to `executeQuery`).
+
+**UI** (above the grid): a bar showing the active block; each row = a condition
+(column select → operator select → value input(s)); buttons to add condition /
+add nested group / toggle AND·OR / negate / remove; a Clear. Apply runs the
+filtered query (drives the same grid). Persist the active filter per tab in a
+`useFilterStore` (Zustand), mirroring SlashTable's store.
+
+**Integration:** the filtered fetch can go through `executeQuery` with the
+compiled WHERE (read path), or add an optional `where` param to `get_records`.
+Compose with sorting/paging already in the grid. This composes naturally with
+the drilldown (a drilldown tab is just a pre-seeded condition `fk = value`).
