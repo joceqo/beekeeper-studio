@@ -60,7 +60,23 @@ export function Sidebar() {
   }, []);
 
   useEffect(() => {
-    if (activeConnectionId) backend.listTables(activeConnectionId).then(setTables);
+    if (!activeConnectionId) return;
+    let cancelled = false;
+    // BUG FIX: await connect so the saved connection id resolves to the live
+    // connectionId before listTables fires — otherwise the first call can go
+    // out with an unresolved id and fail.
+    backend
+      .connect(activeConnectionId)
+      .then((liveId) => backend.listTables(liveId))
+      .then((t) => {
+        if (!cancelled) setTables(t);
+      })
+      .catch(() => {
+        if (!cancelled) setTables([]);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [activeConnectionId]);
 
   if (collapsed) {

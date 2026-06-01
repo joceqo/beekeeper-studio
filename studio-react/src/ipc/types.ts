@@ -112,6 +112,13 @@ export interface SchemaGraph {
  */
 export interface BackendClient {
   listConnections(): Promise<Connection[]>;
+  /**
+   * Open/resolve a saved connection, mapping the UI connection id (e.g. a saved
+   * id) to the live backend connectionId. Must be awaited before any
+   * schema/data call so requests never fire with an unresolved id. Returns the
+   * live connectionId. Idempotent and deduped per connection.
+   */
+  connect(connectionId: string): Promise<string>;
   listSchemas(connectionId: string): Promise<Schema[]>;
   listTables(connectionId: string, schema?: string): Promise<TableSummary[]>;
   describeTable(

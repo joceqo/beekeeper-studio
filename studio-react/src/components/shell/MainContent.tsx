@@ -21,6 +21,7 @@ export function MainContent() {
     return (
       <TableView
         key={tab.id}
+        tabId={tab.id}
         connectionId={tab.connectionId!}
         schema={tab.schema!}
         table={tab.table!}

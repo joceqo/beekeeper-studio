@@ -45,6 +45,12 @@ function genericRows(table: string, count: number) {
  * MessagePort-backed client (same interface) when wiring the Electron backend.
  */
 export class MockBackendClient implements BackendClient {
+  /** Mock connections are already "live"; just echo the id back. */
+  async connect(connectionId: string) {
+    await delay(jitter(40, 120));
+    return connectionId;
+  }
+
   async listConnections() {
     await delay(jitter(60, 160));
     return structuredClone(MOCK_CONNECTIONS);

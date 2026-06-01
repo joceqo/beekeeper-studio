@@ -64,6 +64,11 @@ no Electron renderer build required — to show live tables and rows.
    rows in the Glide grid; the **schema-graph** button (TABLES header, or a graph
    tab) renders foreign-key relationships from `get_schema_graph`.
 
+The data-loading flow **awaits `backend.connect(connectionId)` first** (it maps a
+saved/UI connection id to the live `connectionId`, e.g. `saved:1` → `mcp:1`) and
+uses the resolved id for every subsequent `describeTable` / `getRecords` /
+`listTables` call, so no request fires with an unresolved id.
+
 CORS: the MCP server reflects loopback origins (`localhost` / `127.0.0.1`) so the
 browser dev server can call it; non-loopback origins are not granted CORS.
 
@@ -108,6 +113,17 @@ the `mcp-session-id` header), then `tools/call`s `list_saved_connections` /
   icon rail.
 - **Data grid** — Glide canvas grid with ~50+ mock rows for `public.users`
   (id / email / username / …), smooth scrolling, NULL styling, typed cells.
+- **Right detail dock** — collapsible + resizable panel docked on the right of
+  the grid (toggle in the table toolbar, persisted). Two modes driven by grid
+  selection: **Row detail** (select a row) shows a vertical key→value form with
+  column name / type / value, NULLs styled, and foreign-key values rendered as
+  clickable links (groundwork for relationship drilldown — currently opens the
+  referenced table tab + `console.info`s the target `{table, column, value}`;
+  TODO marks where the full breadcrumb drilldown goes). **Column detail** (click
+  a header) shows name / type / nullable / PK / FK plus per-column **format**
+  options (Text / Number / Currency / Percentage / Thousands) and a
+  **visibility** toggle, both stored per column in a Zustand store and applied
+  when the Glide grid renders that column.
 - **Query editor** — Monaco with a Run button and a results grid below
   (resizable splitter); themed to match the app.
 - **Activity panel** — resizable + collapsible bottom dock; category tabs
@@ -131,6 +147,9 @@ All data access goes through one narrow typed interface,
 ```ts
 interface BackendClient {
   listConnections(): Promise<Connection[]>;
+  // Resolve a saved/UI connection id to the live connectionId. AWAIT this
+  // before any schema/data call so requests never fire with an unresolved id.
+  connect(connectionId): Promise<string>;
   listSchemas(connectionId): Promise<Schema[]>;
   listTables(connectionId, schema?): Promise<TableSummary[]>;
   describeTable(connectionId, table, schema?): Promise<TableDescription>;

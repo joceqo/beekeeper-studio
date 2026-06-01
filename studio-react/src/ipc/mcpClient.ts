@@ -265,6 +265,11 @@ export class McpBackendClient implements BackendClient {
 
   // --- BackendClient ------------------------------------------------------
 
+  /** Open/resolve the saved connection and return the live MCP connectionId. */
+  async connect(connectionId: string): Promise<string> {
+    return this.resolveConnection(connectionId);
+  }
+
   async listConnections(): Promise<Connection[]> {
     const saved = await this.callTool<SavedConnectionDTO[]>("list_saved_connections");
     return saved.map((c) => ({

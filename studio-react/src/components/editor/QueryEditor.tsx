@@ -145,7 +145,7 @@ export function QueryEditor({ tabId, sql }: Props) {
 
       <div className="shrink-0" style={{ height: resultsHeight }}>
         {result ? (
-          <DataGrid columns={result.columns} rows={result.rows} />
+          <DataGrid tabId={tabId} columns={result.columns} rows={result.rows} />
         ) : (
           <div className="flex h-full items-center justify-center text-xs text-text-muted">
             Run a query to see results

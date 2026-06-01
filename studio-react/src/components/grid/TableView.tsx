@@ -7,13 +7,19 @@ import {
   ChevronLeft,
   ChevronRight,
   AlertTriangle,
+  PanelRightOpen,
+  PanelRightClose,
 } from "lucide-react";
-import { backend, type RecordPage } from "@/ipc";
+import { backend, type RecordPage, type TableDescription } from "@/ipc";
 import { DataGrid, type SortState } from "./DataGrid";
+import { DetailPanel } from "@/components/detail/DetailPanel";
 import { useActivityStore } from "@/store/activity";
 import { useStatusStore } from "@/store/status";
+import { useSelectionStore } from "@/store/selection";
+import { useDetailDockStore } from "@/store/detailDock";
 
 interface Props {
+  tabId: string;
   connectionId: string;
   schema: string;
   table: string;
@@ -21,8 +27,9 @@ interface Props {
 
 const PAGE_SIZE = 100;
 
-export function TableView({ connectionId, schema, table }: Props) {
+export function TableView({ tabId, connectionId, schema, table }: Props) {
   const [page, setPage] = useState<RecordPage | null>(null);
+  const [description, setDescription] = useState<TableDescription | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
@@ -30,22 +37,48 @@ export function TableView({ connectionId, schema, table }: Props) {
   const pushActivity = useActivityStore((s) => s.push);
   const setStatus = useStatusStore((s) => s.set);
 
+  // Selection (drives the detail panel) + dock visibility.
+  const selection = useSelectionStore((s) => s.byTab[tabId]) ?? {
+    rowIndex: null,
+    columnName: null,
+    mode: null,
+  };
+  const selectRow = useSelectionStore((s) => s.selectRow);
+  const selectColumn = useSelectionStore((s) => s.selectColumn);
+  const clearSelection = useSelectionStore((s) => s.clear);
+  const dockOpen = useDetailDockStore((s) => s.open);
+  const toggleDock = useDetailDockStore((s) => s.toggle);
+  const dockWidth = useDetailDockStore((s) => s.width);
+  const setDockWidth = useDetailDockStore((s) => s.setWidth);
+
   const load = useCallback(() => {
     setLoading(true);
     setError(null);
+    // BUG FIX: await connect first so the saved/unresolved connection id is
+    // mapped to the live connectionId before any schema/data call fires. The
+    // resolved id is then used for every subsequent request.
     backend
-      .getRecords({
-        connectionId,
-        schema,
-        table,
-        limit: PAGE_SIZE,
-        offset,
-        orderBy: sort ? [{ column: sort.column, direction: sort.direction }] : undefined,
-      })
-      .then((p) => {
+      .connect(connectionId)
+      .then(async (liveId) => {
+        // Describe in parallel for FK / nullable metadata used by the panel.
+        const descPromise = backend
+          .describeTable(liveId, table, schema)
+          .then(setDescription)
+          .catch(() => setDescription(null));
+        const p = await backend.getRecords({
+          connectionId: liveId,
+          schema,
+          table,
+          limit: PAGE_SIZE,
+          offset,
+          orderBy: sort ? [{ column: sort.column, direction: sort.direction }] : undefined,
+        });
+        await descPromise;
         setPage(p);
         setStatus({ elapsedMs: p.elapsedMs, loaded: p.loaded, total: p.totalRows });
-        const orderClause = sort ? ` ORDER BY "${sort.column}" ${sort.direction.toUpperCase()}` : "";
+        const orderClause = sort
+          ? ` ORDER BY "${sort.column}" ${sort.direction.toUpperCase()}`
+          : "";
         pushActivity({
           category: "User",
           op: "SELECT",
@@ -79,6 +112,23 @@ export function TableView({ connectionId, schema, table }: Props) {
   const onNext = () => setOffset((o) => o + PAGE_SIZE);
   const hasNext = page ? page.loaded === PAGE_SIZE : false;
   const pageNum = Math.floor(offset / PAGE_SIZE) + 1;
+
+  // Resize the detail dock by dragging its left edge.
+  const startResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = dockWidth;
+    const move = (ev: MouseEvent) => setDockWidth(startW - (ev.clientX - startX));
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
+
+  const selectedRow =
+    page && selection.rowIndex != null ? page.rows[selection.rowIndex] ?? null : null;
 
   return (
     <div className="flex h-full flex-col">
@@ -124,37 +174,80 @@ export function TableView({ connectionId, schema, table }: Props) {
           <span className="text-xs text-text-muted">
             {page ? `${page.loaded} loaded · rows ${offset + 1}–${offset + page.loaded}` : "—"}
           </span>
+          <div className="mx-1 h-4 w-px bg-border" />
+          <button
+            className="grid-toolbar-btn"
+            title={dockOpen ? "Hide detail panel" : "Show detail panel"}
+            onClick={toggleDock}
+          >
+            {dockOpen ? <PanelRightClose size={13} /> : <PanelRightOpen size={13} />}
+          </button>
         </div>
       </div>
 
-      <div className="relative min-h-0 flex-1">
-        {error ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
-            <AlertTriangle size={22} className="text-danger" />
-            <div className="text-md text-text-primary">Could not load records</div>
-            <div className="max-w-xl font-mono text-xs text-text-muted">{error}</div>
-            <button
-              className="mt-2 rounded-sm border border-border px-3 py-1 text-sm text-text-secondary hover:bg-bg-hover"
-              onClick={load}
-            >
-              Retry
-            </button>
-          </div>
-        ) : loading && !page ? (
-          <div className="flex h-full items-center justify-center gap-2 text-md text-text-muted">
-            <RefreshCw size={14} className="animate-spin" /> Loading {schema}.{table}…
-          </div>
-        ) : page && page.columns.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-md text-text-muted">
-            No columns to display.
-          </div>
-        ) : page && page.rows.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-md text-text-muted">
-            No rows{offset > 0 ? " on this page" : ""}.
-          </div>
-        ) : page ? (
-          <DataGrid columns={page.columns} rows={page.rows} sort={sort} onSort={onSort} />
-        ) : null}
+      <div className="flex min-h-0 flex-1">
+        <div className="relative min-h-0 min-w-0 flex-1">
+          {error ? (
+            <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
+              <AlertTriangle size={22} className="text-danger" />
+              <div className="text-md text-text-primary">Could not load records</div>
+              <div className="max-w-xl font-mono text-xs text-text-muted">{error}</div>
+              <button
+                className="mt-2 rounded-sm border border-border px-3 py-1 text-sm text-text-secondary hover:bg-bg-hover"
+                onClick={load}
+              >
+                Retry
+              </button>
+            </div>
+          ) : loading && !page ? (
+            <div className="flex h-full items-center justify-center gap-2 text-md text-text-muted">
+              <RefreshCw size={14} className="animate-spin" /> Loading {schema}.{table}…
+            </div>
+          ) : page && page.columns.length === 0 ? (
+            <div className="flex h-full items-center justify-center text-md text-text-muted">
+              No columns to display.
+            </div>
+          ) : page && page.rows.length === 0 ? (
+            <div className="flex h-full items-center justify-center text-md text-text-muted">
+              No rows{offset > 0 ? " on this page" : ""}.
+            </div>
+          ) : page ? (
+            <DataGrid
+              tabId={tabId}
+              columns={page.columns}
+              rows={page.rows}
+              sort={sort}
+              onSort={onSort}
+              onRowSelect={(i) => selectRow(tabId, i)}
+              onColumnSelect={(name) => selectColumn(tabId, name)}
+            />
+          ) : null}
+        </div>
+
+        {dockOpen && (
+          <>
+            <div
+              className="w-px shrink-0 cursor-col-resize bg-border hover:bg-accent"
+              onMouseDown={startResize}
+            />
+            <div className="shrink-0" style={{ width: dockWidth }}>
+              <DetailPanel
+                tabId={tabId}
+                connectionId={connectionId}
+                columns={page?.columns ?? []}
+                row={selectedRow}
+                rowIndex={selection.rowIndex}
+                columnName={selection.columnName}
+                mode={selection.mode}
+                description={description}
+                onClose={() => {
+                  clearSelection(tabId);
+                  toggleDock();
+                }}
+              />
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

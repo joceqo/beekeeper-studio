@@ -3,12 +3,14 @@ import DataEditor, {
   GridCell,
   GridCellKind,
   GridColumn,
+  GridSelection,
   Item,
   Theme,
 } from "@glideapps/glide-data-grid";
 import "@glideapps/glide-data-grid/dist/index.css";
 import type { CellValue, ColumnDef } from "@/ipc";
 import { useThemeStore } from "@/store/theme";
+import { useColumnConfigStore, formatCellValue } from "@/store/columnConfig";
 
 /** Read a CSS custom property off the document root. */
 function token(name: string): string {
@@ -89,21 +91,51 @@ export interface SortState {
 }
 
 export interface DataGridProps {
+  /** Owning tab id; scopes per-column config + selection. */
+  tabId: string;
   columns: ColumnDef[];
   rows: CellValue[][];
   sort?: SortState | null;
   /** Cycles asc -> desc -> none for the clicked column. */
   onSort?: (column: string) => void;
+  /** Fired with the selected row index (page-relative), or null when cleared. */
+  onRowSelect?: (rowIndex: number | null) => void;
+  /** Fired with the focused column name, or null when cleared. */
+  onColumnSelect?: (columnName: string | null) => void;
 }
 
-export function DataGrid({ columns, rows, sort, onSort }: DataGridProps) {
+export function DataGrid({
+  tabId,
+  columns,
+  rows,
+  sort,
+  onSort,
+  onRowSelect,
+  onColumnSelect,
+}: DataGridProps) {
   // re-derive theme when app theme flips
   const theme = useThemeStore((s) => s.theme);
   const glide = useMemo(() => glideTheme(), [theme]);
 
+  // Per-column display config (format + visibility) for this tab.
+  const configByKey = useColumnConfigStore((s) => s.byKey);
+  const columnConfig = useCallback(
+    (name: string) => configByKey[`${tabId}::${name}`] ?? { format: "text" as const, hidden: false },
+    [configByKey, tabId]
+  );
+
+  // Visible columns map to original indices, so cell lookups stay correct.
+  const visible = useMemo(
+    () =>
+      columns
+        .map((c, originalIndex) => ({ c, originalIndex }))
+        .filter(({ c }) => !columnConfig(c.name).hidden),
+    [columns, columnConfig]
+  );
+
   const gridColumns = useMemo<GridColumn[]>(
     () =>
-      columns.map((c) => {
+      visible.map(({ c }) => {
         const arrow = sort?.column === c.name ? (sort.direction === "asc" ? " ↑" : " ↓") : "";
         return {
           title: c.name + arrow,
@@ -112,13 +144,15 @@ export function DataGrid({ columns, rows, sort, onSort }: DataGridProps) {
           icon: c.primaryKey ? "headerRowID" : undefined,
         };
       }),
-    [columns, sort]
+    [visible, sort]
   );
 
   const getCellContent = useCallback(
     ([col, row]: Item): GridCell => {
-      const def = columns[col];
-      const raw = rows[row]?.[col];
+      const mapped = visible[col];
+      const def = mapped?.c;
+      const raw = mapped ? rows[row]?.[mapped.originalIndex] : undefined;
+      const format = def ? columnConfig(def.name).format : "text";
 
       if (raw === null || raw === undefined) {
         return {
@@ -141,10 +175,12 @@ export function DataGrid({ columns, rows, sort, onSort }: DataGridProps) {
       }
       if (typeof raw === "number" || (def && isNumeric(def))) {
         const num = typeof raw === "number" ? raw : Number(raw);
+        const finite = Number.isFinite(num);
         return {
           kind: GridCellKind.Number,
-          data: Number.isFinite(num) ? num : undefined,
-          displayData: String(raw),
+          data: finite ? num : undefined,
+          // Apply the per-column format (currency / percentage / thousands / …).
+          displayData: finite ? formatCellValue(num, format) : String(raw),
           allowOverlay: true,
           contentAlign: "right",
         };
@@ -157,15 +193,31 @@ export function DataGrid({ columns, rows, sort, onSort }: DataGridProps) {
         allowOverlay: true,
       };
     },
-    [columns, rows]
+    [visible, rows, columnConfig]
   );
 
   const onHeaderClicked = useCallback(
     (colIndex: number) => {
-      const def = columns[colIndex];
-      if (def && onSort) onSort(def.name);
+      const def = visible[colIndex]?.c;
+      if (!def) return;
+      onColumnSelect?.(def.name);
+      if (onSort) onSort(def.name);
     },
-    [columns, onSort]
+    [visible, onSort, onColumnSelect]
+  );
+
+  const onGridSelectionChange = useCallback(
+    (sel: GridSelection) => {
+      // A cell/row selection focuses a row for the detail panel.
+      if (sel.current) {
+        onRowSelect?.(sel.current.cell[1]);
+      } else if (sel.rows.length > 0) {
+        onRowSelect?.(sel.rows.first() ?? null);
+      } else {
+        onRowSelect?.(null);
+      }
+    },
+    [onRowSelect]
   );
 
   return (
@@ -182,6 +234,7 @@ export function DataGrid({ columns, rows, sort, onSort }: DataGridProps) {
         height="100%"
         getCellsForSelection
         onHeaderClicked={onHeaderClicked}
+        onGridSelectionChange={onGridSelectionChange}
         keybindings={{ search: true }}
       />
     </div>
