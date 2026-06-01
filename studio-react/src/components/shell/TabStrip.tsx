@@ -1,10 +1,11 @@
-import { X, Plus, Table2, FileCode, Database } from "lucide-react";
+import { X, Plus, Table2, FileCode, Database, Workflow } from "lucide-react";
 import { useTabsStore, type Tab } from "@/store/tabs";
 import { cn } from "@/lib/cn";
 
 function TabIcon({ kind }: { kind: Tab["kind"] }) {
   if (kind === "query") return <FileCode size={12} />;
   if (kind === "connection") return <Database size={12} />;
+  if (kind === "graph") return <Workflow size={12} />;
   return <Table2 size={12} />;
 }
 

@@ -77,6 +77,31 @@ export interface GetRecordsParams {
   table: string;
   limit?: number;
   offset?: number;
+  /** Optional client-driven sort, applied via getRecords. */
+  orderBy?: { column: string; direction: "asc" | "desc" }[];
+}
+
+/** A table node in the schema relationship graph. */
+export interface SchemaGraphNode {
+  schema: string;
+  table: string;
+  /** A few representative columns to render inside the node. */
+  columns: { name: string; dataType?: string; primaryKey?: boolean }[];
+}
+
+/** A foreign-key edge between two tables in the schema graph. */
+export interface SchemaGraphEdge {
+  fromSchema: string;
+  fromTable: string;
+  fromColumn: string;
+  toSchema: string;
+  toTable: string;
+  toColumn: string;
+}
+
+export interface SchemaGraph {
+  nodes: SchemaGraphNode[];
+  edges: SchemaGraphEdge[];
 }
 
 /**
@@ -96,4 +121,5 @@ export interface BackendClient {
   ): Promise<TableDescription>;
   getRecords(params: GetRecordsParams): Promise<RecordPage>;
   executeQuery(connectionId: string, sql: string): Promise<QueryResult>;
+  getSchemaGraph(connectionId: string, schema?: string): Promise<SchemaGraph>;
 }

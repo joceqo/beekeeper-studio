@@ -26,6 +26,65 @@ yarn preview    # serve the production build
 yarn typecheck  # tsc only
 ```
 
+## Run it against a REAL database (via the app's MCP server)
+
+The app ships an in-process **MCP** (Model Context Protocol) server over loopback
+Streamable HTTP. This React renderer can talk to it directly from the browser —
+no Electron renderer build required — to show live tables and rows.
+
+1. **Enable MCP in the Electron app.** In `apps/studio/local.config.ini`:
+
+   ```ini
+   [mcp]
+   enabled = true
+   port = 27500
+   defaultAccess = read
+   ```
+
+2. **Start the Electron app** and wait for `MCP server listening on
+   http://127.0.0.1:27500/mcp` in the log:
+
+   ```bash
+   cd apps/studio && yarn electron:serve
+   ```
+
+3. **Open a connection in the app** (e.g. `mlc (local)`). Saved connections are
+   listed by MCP; this renderer auto-opens (`connect`, access `read`) whichever
+   one you click in the sidebar, so it doesn't strictly need to be open first.
+
+4. **Run this renderer pointed at MCP:**
+
+   ```bash
+   cd studio-react
+   VITE_BACKEND=mcp yarn dev          # -> http://localhost:5273
+   # optional: VITE_MCP_URL=http://127.0.0.1:27500/mcp (this is the default)
+   ```
+
+   Click a connection in the sidebar to load its tables; click a table for live
+   rows in the Glide grid; the **schema-graph** button (TABLES header, or a graph
+   tab) renders foreign-key relationships from `get_schema_graph`.
+
+CORS: the MCP server reflects loopback origins (`localhost` / `127.0.0.1`) so the
+browser dev server can call it; non-loopback origins are not granted CORS.
+
+### Backend selection
+
+The app picks its `BackendClient` at startup from Vite env flags
+([`src/ipc/index.ts`](src/ipc/index.ts)):
+
+| Env | Client |
+| --- | --- |
+| _(unset / anything else)_ | `MockBackendClient` (in-memory canned data) — **default** |
+| `VITE_BACKEND=mcp` | `McpBackendClient` (real DB via MCP HTTP) |
+| `VITE_MCP_URL=<url>` | overrides the MCP endpoint (default `http://127.0.0.1:27500/mcp`) |
+
+`McpBackendClient` ([`src/ipc/mcpClient.ts`](src/ipc/mcpClient.ts)) implements the
+exact same `BackendClient` interface: it lazily `initialize`s a session (capturing
+the `mcp-session-id` header), then `tools/call`s `list_saved_connections` /
+`connect` / `list_schemas` / `list_tables` / `describe_table` / `get_records` /
+`execute_query` / `get_schema_graph`, parsing the SSE `data:` line and the JSON in
+`content[0].text`. Components and stores still consume only the interface.
+
 ## Stack
 
 - Vite + React 18 + TypeScript

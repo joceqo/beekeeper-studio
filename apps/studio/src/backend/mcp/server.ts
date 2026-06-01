@@ -122,10 +122,46 @@ export class BeekeeperMcpServer {
     log.info("MCP server stopped");
   }
 
+  /**
+   * Reflect loopback origins so a local browser app (e.g. the standalone
+   * studio-react dev server on http://localhost:5273) can call this endpoint.
+   * Kept loopback-only — non-localhost origins get no CORS headers and the
+   * browser blocks them. The endpoint itself is still bound to 127.0.0.1.
+   */
+  private applyCors(req: http.IncomingMessage, res: http.ServerResponse): void {
+    const origin = req.headers.origin;
+    if (!origin) return;
+    let host: string;
+    try {
+      host = new URL(origin).hostname;
+    } catch {
+      return;
+    }
+    const isLoopback =
+      host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1";
+    if (!isLoopback) return;
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "content-type, mcp-session-id, accept, mcp-protocol-version"
+    );
+    res.setHeader("Access-Control-Allow-Methods", "POST, GET, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Expose-Headers", "mcp-session-id");
+  }
+
   private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const url = new URL(req.url ?? "/", `http://${this.host}`);
     if (url.pathname !== "/mcp") {
       res.writeHead(404).end();
+      return;
+    }
+
+    this.applyCors(req, res);
+
+    // Preflight: answer here so the actual MCP request can carry custom headers.
+    if (req.method === "OPTIONS") {
+      res.writeHead(204).end();
       return;
     }
 

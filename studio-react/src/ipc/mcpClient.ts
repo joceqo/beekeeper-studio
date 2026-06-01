@@ -1,0 +1,493 @@
+import type {
+  BackendClient,
+  CellValue,
+  ColumnDef,
+  Connection,
+  GetRecordsParams,
+  QueryResult,
+  RecordPage,
+  Schema,
+  SchemaGraph,
+  TableDescription,
+  TableSummary,
+} from "./types";
+
+/**
+ * BackendClient implementation that talks to Beekeeper Studio's in-app MCP
+ * server over Streamable HTTP (the same endpoint a coding agent would use).
+ *
+ * Protocol:
+ *  1. POST an `initialize` JSON-RPC request; capture the `mcp-session-id`
+ *     response header.
+ *  2. POST `tools/call` with that header. Responses come back as SSE
+ *     (`data: {json}` lines); parse the JSON-RPC result, then JSON.parse the
+ *     single text content block (`result.content[0].text`).
+ *
+ * The MCP server exposes saved connections (`list_saved_connections`) that must
+ * be opened with `connect` before the data tools work. This client connects the
+ * requested saved connection on demand (access "read") and caches the live
+ * connectionId it gets back.
+ */
+
+const PROTOCOL_VERSION = "2024-11-05";
+
+interface JsonRpcResponse {
+  jsonrpc: "2.0";
+  id: number | string | null;
+  result?: unknown;
+  error?: { code: number; message: string };
+}
+
+interface ToolResultEnvelope {
+  content?: { type: string; text?: string }[];
+  isError?: boolean;
+}
+
+interface SavedConnectionDTO {
+  savedConnectionId: number;
+  name: string;
+  connectionType: string;
+  host: string | null;
+  port: number | null;
+  database: string | null;
+  open: boolean;
+}
+
+interface DescribeTableDTO {
+  table: string;
+  schema: string | null;
+  columns: { name: string; type: string; nullable: boolean; default: string | null }[];
+  primaryKey: string[];
+  indexes: { name: string; columns: string[]; unique: boolean }[];
+  foreignKeys: {
+    column: string;
+    referencesTable: string;
+    referencesColumn: string;
+    referencesSchema: string | null;
+  }[];
+}
+
+/** Map a Beekeeper connectionType to the UI's narrower `kind`. */
+function kindFor(connectionType: string): Connection["kind"] {
+  switch (connectionType) {
+    case "mysql":
+    case "mariadb":
+    case "tidb":
+      return "mysql";
+    case "sqlite":
+      return "sqlite";
+    case "sqlserver":
+      return "sqlserver";
+    default:
+      return "postgres";
+  }
+}
+
+/** Saved-connection id encoded into the UI Connection id, so we can connect it later. */
+const idFor = (savedConnectionId: number) => `saved:${savedConnectionId}`;
+const savedIdFromUiId = (uiId: string): number | null => {
+  const m = /^saved:(\d+)$/.exec(uiId);
+  return m ? Number(m[1]) : null;
+};
+
+export class McpBackendClient implements BackendClient {
+  private readonly baseUrl: string;
+  private sessionId: string | null = null;
+  private initializing: Promise<void> | null = null;
+  private requestId = 0;
+
+  /** Maps the UI connection id (`saved:<n>`) to the live MCP connectionId. */
+  private readonly liveByUiId = new Map<string, string>();
+  /** In-flight connect() calls keyed by UI id, to dedupe concurrent opens. */
+  private readonly connecting = new Map<string, Promise<string>>();
+
+  constructor(baseUrl = "http://127.0.0.1:27500/mcp") {
+    this.baseUrl = baseUrl;
+  }
+
+  // --- low-level MCP transport -------------------------------------------
+
+  private async ensureSession(): Promise<void> {
+    if (this.sessionId) return;
+    if (!this.initializing) {
+      this.initializing = this.initialize().catch((err) => {
+        this.initializing = null;
+        throw err;
+      });
+    }
+    await this.initializing;
+  }
+
+  private async initialize(): Promise<void> {
+    const res = await fetch(this.baseUrl, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        "mcp-protocol-version": PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: ++this.requestId,
+        method: "initialize",
+        params: {
+          protocolVersion: PROTOCOL_VERSION,
+          capabilities: {},
+          clientInfo: { name: "studio-react", version: "0.1.0" },
+        },
+      }),
+    });
+    if (!res.ok) {
+      throw new Error(`MCP initialize failed: HTTP ${res.status} ${res.statusText}`);
+    }
+    const sid = res.headers.get("mcp-session-id");
+    if (!sid) {
+      throw new Error("MCP initialize did not return an mcp-session-id header");
+    }
+    this.sessionId = sid;
+    // Drain the initialize response body (SSE or JSON); we only needed the header.
+    await res.text();
+
+    // Per spec, follow up with the initialized notification.
+    await fetch(this.baseUrl, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        "mcp-protocol-version": PROTOCOL_VERSION,
+        "mcp-session-id": this.sessionId,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        method: "notifications/initialized",
+        params: {},
+      }),
+    }).catch(() => {
+      /* notification failure is non-fatal */
+    });
+  }
+
+  /** Pull the single JSON-RPC response object out of an SSE or JSON body. */
+  private parseRpc(body: string): JsonRpcResponse {
+    const trimmed = body.trim();
+    // Plain JSON body.
+    if (trimmed.startsWith("{")) {
+      return JSON.parse(trimmed) as JsonRpcResponse;
+    }
+    // SSE: collect `data:` lines, parse each, return the first JSON-RPC response.
+    for (const line of trimmed.split(/\r?\n/)) {
+      const m = /^data:\s?(.*)$/.exec(line);
+      if (!m || !m[1]) continue;
+      try {
+        const parsed = JSON.parse(m[1]) as JsonRpcResponse;
+        if (parsed && (parsed.result !== undefined || parsed.error !== undefined)) {
+          return parsed;
+        }
+      } catch {
+        /* skip non-JSON data lines */
+      }
+    }
+    throw new Error("No JSON-RPC response found in MCP SSE body");
+  }
+
+  /** Call an MCP tool and JSON.parse its single text content block. */
+  private async callTool<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
+    await this.ensureSession();
+    const res = await fetch(this.baseUrl, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        "mcp-protocol-version": PROTOCOL_VERSION,
+        "mcp-session-id": this.sessionId!,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: ++this.requestId,
+        method: "tools/call",
+        params: { name, arguments: args },
+      }),
+    });
+
+    if (res.status === 404) {
+      // Session expired/unknown — reset and retry once.
+      this.sessionId = null;
+      this.initializing = null;
+      await this.ensureSession();
+      return this.callTool<T>(name, args);
+    }
+    if (!res.ok) {
+      throw new Error(`MCP tool ${name} failed: HTTP ${res.status} ${res.statusText}`);
+    }
+
+    const rpc = this.parseRpc(await res.text());
+    if (rpc.error) {
+      throw new Error(`MCP tool ${name} error: ${rpc.error.message}`);
+    }
+    const envelope = rpc.result as ToolResultEnvelope;
+    const text = envelope?.content?.[0]?.text ?? "";
+    if (envelope?.isError) {
+      throw new Error(`MCP tool ${name}: ${text}`);
+    }
+    if (!text) {
+      throw new Error(`MCP tool ${name} returned no text content`);
+    }
+    return JSON.parse(text) as T;
+  }
+
+  /** Resolve the live MCP connectionId for a UI connection id, connecting if needed. */
+  private async resolveConnection(uiId: string): Promise<string> {
+    const cached = this.liveByUiId.get(uiId);
+    if (cached) return cached;
+
+    const inFlight = this.connecting.get(uiId);
+    if (inFlight) return inFlight;
+
+    const savedId = savedIdFromUiId(uiId);
+    if (savedId == null) {
+      // Already a live MCP connectionId (e.g. "mcp:3"); use as-is.
+      this.liveByUiId.set(uiId, uiId);
+      return uiId;
+    }
+
+    const promise = this.callTool<{ connectionId: string }>("connect", {
+      savedConnectionId: savedId,
+      access: "read",
+    })
+      .then((r) => {
+        this.liveByUiId.set(uiId, r.connectionId);
+        return r.connectionId;
+      })
+      .finally(() => this.connecting.delete(uiId));
+    this.connecting.set(uiId, promise);
+    return promise;
+  }
+
+  // --- BackendClient ------------------------------------------------------
+
+  async listConnections(): Promise<Connection[]> {
+    const saved = await this.callTool<SavedConnectionDTO[]>("list_saved_connections");
+    return saved.map((c) => ({
+      id: idFor(c.savedConnectionId),
+      name: c.name,
+      kind: kindFor(c.connectionType),
+      host:
+        c.host != null
+          ? c.port != null
+            ? `${c.host}:${c.port}`
+            : c.host
+          : c.database ?? undefined,
+      connected: c.open,
+    }));
+  }
+
+  async listSchemas(connectionId: string): Promise<Schema[]> {
+    const live = await this.resolveConnection(connectionId);
+    const schemas = await this.callTool<string[]>("list_schemas", { connectionId: live });
+    return schemas.map((name) => ({ name, tableCount: 0 }));
+  }
+
+  async listTables(connectionId: string, schema?: string): Promise<TableSummary[]> {
+    const live = await this.resolveConnection(connectionId);
+    const res = await this.callTool<{
+      tables: { name: string; schema: string }[];
+      views: { name: string; schema: string }[];
+    }>("list_tables", schema ? { connectionId: live, schema } : { connectionId: live });
+    const tables: TableSummary[] = res.tables.map((t) => ({
+      schema: t.schema,
+      name: t.name,
+      type: "table",
+      rowEstimate: 0,
+    }));
+    const views: TableSummary[] = res.views.map((v) => ({
+      schema: v.schema,
+      name: v.name,
+      type: "view",
+      rowEstimate: 0,
+    }));
+    return [...tables, ...views];
+  }
+
+  async describeTable(
+    connectionId: string,
+    table: string,
+    schema?: string
+  ): Promise<TableDescription> {
+    const live = await this.resolveConnection(connectionId);
+    const dto = await this.callTool<DescribeTableDTO>(
+      "describe_table",
+      schema ? { connectionId: live, table, schema } : { connectionId: live, table }
+    );
+    const pk = new Set(dto.primaryKey ?? []);
+    return {
+      schema: dto.schema ?? schema ?? "public",
+      table: dto.table,
+      columns: dto.columns.map((c) => ({
+        name: c.name,
+        dataType: c.type,
+        nullable: c.nullable,
+        primaryKey: pk.has(c.name),
+        default: c.default,
+      })),
+      indexes: dto.indexes ?? [],
+      foreignKeys: (dto.foreignKeys ?? []).map((k) => ({
+        column: k.column,
+        references: `${k.referencesSchema ? `${k.referencesSchema}.` : ""}${k.referencesTable}(${k.referencesColumn})`,
+      })),
+    };
+  }
+
+  async getRecords(params: GetRecordsParams): Promise<RecordPage> {
+    const live = await this.resolveConnection(params.connectionId);
+    const limit = params.limit ?? 100;
+    const offset = params.offset ?? 0;
+
+    // Always describe so the grid gets ordered, typed columns. (The get_records
+    // tool returns rows as objects keyed by column name, with no metadata.)
+    const desc = await this.describeTable(params.connectionId, params.table, params.schema);
+    const columns = desc.columns;
+
+    const started = performance.now();
+    let rowObjs: Record<string, CellValue>[];
+    const sort = params.orderBy?.[0];
+
+    if (sort) {
+      // The get_records tool ignores orderBy, so issue an explicit ordered query.
+      const ident = (s: string) => `"${s.replace(/"/g, '""')}"`;
+      const qualified = params.schema
+        ? `${ident(params.schema)}.${ident(params.table)}`
+        : ident(params.table);
+      const sql = `SELECT * FROM ${qualified} ORDER BY ${ident(sort.column)} ${
+        sort.direction === "desc" ? "DESC" : "ASC"
+      } LIMIT ${limit} OFFSET ${offset}`;
+      const results = await this.callTool<
+        { rows: Record<string, CellValue>[]; rowCount: number }[]
+      >("execute_query", { connectionId: live, sql });
+      rowObjs = results?.[0]?.rows ?? [];
+    } else {
+      const res = await this.callTool<{
+        rowCount: number;
+        rows: Record<string, CellValue>[];
+      }>(
+        "get_records",
+        params.schema
+          ? { connectionId: live, table: params.table, schema: params.schema, offset, limit }
+          : { connectionId: live, table: params.table, offset, limit }
+      );
+      rowObjs = res.rows ?? [];
+    }
+
+    const rows: CellValue[][] = rowObjs.map((obj) => columns.map((c) => normalize(obj[c.name])));
+    const elapsedMs = Math.round(performance.now() - started);
+
+    return {
+      columns,
+      rows,
+      totalRows: offset + rows.length + (rows.length === limit ? limit : 0),
+      loaded: rows.length,
+      elapsedMs,
+    };
+  }
+
+  async executeQuery(connectionId: string, sql: string): Promise<QueryResult> {
+    const live = await this.resolveConnection(connectionId);
+    const started = performance.now();
+    const results = await this.callTool<
+      {
+        rowCount: number;
+        affectedRows: number | null;
+        fields: string[];
+        rows: Record<string, CellValue>[];
+        truncated: boolean;
+      }[]
+    >("execute_query", { connectionId: live, sql });
+    const elapsedMs = Math.round(performance.now() - started);
+
+    const first = results?.[0];
+    const fields = first?.fields ?? [];
+    const columns: ColumnDef[] = fields.map((name) => ({
+      name,
+      dataType: "text",
+      nullable: true,
+      primaryKey: false,
+    }));
+    const rows: CellValue[][] = (first?.rows ?? []).map((obj) =>
+      fields.map((f) => normalize(obj[f]))
+    );
+
+    const op = (sql.trim().split(/\s+/)[0] || "SELECT").toUpperCase();
+    const tableMatch = sql.match(/\b(?:from|join|into|update)\s+([a-z_"][\w".]*)/i);
+    const table = tableMatch ? tableMatch[1].replace(/"/g, "") : "";
+
+    return {
+      columns,
+      rows,
+      rowCount: first?.rowCount ?? rows.length,
+      elapsedMs,
+      tables: table ? [table] : [],
+      operation: op,
+    };
+  }
+
+  async getSchemaGraph(connectionId: string, schema?: string): Promise<SchemaGraph> {
+    const live = await this.resolveConnection(connectionId);
+    const raw = await this.callTool<{
+      nodes: { table: string; schema: string }[];
+      edges: {
+        fromTable: string;
+        fromSchema: string;
+        fromColumn: string;
+        toTable: string;
+        toSchema: string;
+        toColumn: string;
+      }[];
+    }>("get_schema_graph", schema ? { connectionId: live, schema } : { connectionId: live });
+
+    // Enrich each node with a few columns via describe_table (bounded concurrency).
+    const nodes: SchemaGraph["nodes"] = [];
+    const limit = 8;
+    for (let i = 0; i < raw.nodes.length; i += limit) {
+      const chunk = raw.nodes.slice(i, i + limit);
+      const described = await Promise.all(
+        chunk.map((n) =>
+          this.describeTable(connectionId, n.table, n.schema)
+            .then((d) => d.columns.slice(0, 8))
+            .catch(() => [] as ColumnDef[])
+        )
+      );
+      chunk.forEach((n, j) => {
+        nodes.push({
+          schema: n.schema,
+          table: n.table,
+          columns: described[j].map((c) => ({
+            name: c.name,
+            dataType: c.dataType,
+            primaryKey: c.primaryKey,
+          })),
+        });
+      });
+    }
+
+    return {
+      nodes,
+      edges: raw.edges.map((e) => ({
+        fromSchema: e.fromSchema,
+        fromTable: e.fromTable,
+        fromColumn: e.fromColumn,
+        toSchema: e.toSchema,
+        toTable: e.toTable,
+        toColumn: e.toColumn,
+      })),
+    };
+  }
+}
+
+/** Coerce arbitrary JSON values from the wire into the grid's CellValue union. */
+function normalize(v: unknown): CellValue {
+  if (v === null || v === undefined) return null;
+  if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") return v;
+  // Dates, buffers, json/array objects — render as text.
+  if (v instanceof Date) return v.toISOString();
+  if (typeof v === "object") return JSON.stringify(v);
+  return String(v);
+}

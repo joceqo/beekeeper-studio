@@ -4,6 +4,7 @@ import type {
   GetRecordsParams,
   QueryResult,
   RecordPage,
+  SchemaGraph,
   TableDescription,
 } from "./types";
 import {
@@ -92,6 +93,23 @@ export class MockBackendClient implements BackendClient {
     const columns = params.table === "users" ? USERS_COLUMNS : genericColumns(params.table);
     const full =
       params.table === "users" ? buildUsersRows(total) : genericRows(params.table, total);
+
+    // Client-driven sort over the full set before paging.
+    const sort = params.orderBy?.[0];
+    if (sort) {
+      const idx = columns.findIndex((c) => c.name === sort.column);
+      if (idx >= 0) {
+        const dir = sort.direction === "desc" ? -1 : 1;
+        full.sort((a, b) => {
+          const av = a[idx];
+          const bv = b[idx];
+          if (av === bv) return 0;
+          if (av === null || av === undefined) return 1;
+          if (bv === null || bv === undefined) return -1;
+          return (av < bv ? -1 : 1) * dir;
+        });
+      }
+    }
     const rows = full.slice(offset, offset + limit);
 
     return {
@@ -100,6 +118,54 @@ export class MockBackendClient implements BackendClient {
       totalRows: total,
       loaded: rows.length,
       elapsedMs: Math.round(jitter(800, 2100)),
+    };
+  }
+
+  async getSchemaGraph(_connectionId: string, schema?: string): Promise<SchemaGraph> {
+    await delay(jitter(120, 320));
+    const tables = MOCK_TABLES.filter((t) => !schema || t.schema === schema);
+    const colsFor = (table: string) =>
+      (table === "users" ? USERS_COLUMNS : genericColumns(table)).map((c) => ({
+        name: c.name,
+        dataType: c.dataType,
+        primaryKey: c.primaryKey,
+      }));
+    return {
+      nodes: tables.map((t) => ({
+        schema: t.schema,
+        table: t.name,
+        columns: colsFor(t.name),
+      })),
+      edges: [
+        {
+          fromSchema: "public",
+          fromTable: "campaigns",
+          fromColumn: "owner_id",
+          toSchema: "public",
+          toTable: "users",
+          toColumn: "id",
+        },
+        {
+          fromSchema: "public",
+          fromTable: "reports",
+          fromColumn: "campaign_id",
+          toSchema: "public",
+          toTable: "campaigns",
+          toColumn: "id",
+        },
+        {
+          fromSchema: "public",
+          fromTable: "events",
+          fromColumn: "user_id",
+          toSchema: "public",
+          toTable: "users",
+          toColumn: "id",
+        },
+      ].filter(
+        (e) =>
+          tables.some((t) => t.schema === e.fromSchema && t.name === e.fromTable) &&
+          tables.some((t) => t.schema === e.toSchema && t.name === e.toTable)
+      ),
     };
   }
 

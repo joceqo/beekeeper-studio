@@ -9,6 +9,7 @@ import {
   Layers,
   PanelLeftClose,
   Plus,
+  Workflow,
 } from "lucide-react";
 import { backend, type Connection, type TableSummary } from "@/ipc";
 import { useSidebarStore } from "@/store/sidebar";
@@ -39,13 +40,23 @@ export function Sidebar() {
 
   const openTable = useTabsStore((s) => s.openTable);
   const openConnection = useTabsStore((s) => s.openConnection);
+  const openGraph = useTabsStore((s) => s.openGraph);
 
   const [connections, setConnections] = useState<Connection[]>([]);
   const [tables, setTables] = useState<TableSummary[]>([]);
   const [search, setSearch] = useState("");
 
   useEffect(() => {
-    backend.listConnections().then(setConnections);
+    backend.listConnections().then((conns) => {
+      setConnections(conns);
+      // If the active connection isn't in the list (e.g. real MCP ids differ
+      // from the mock defaults), select the first one so tables can load.
+      if (conns.length && !conns.some((c) => c.id === activeConnectionId)) {
+        setActiveConnection(conns[0].id);
+        toggleConnection(conns[0].id);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -145,6 +156,14 @@ export function Sidebar() {
         <span className="text-xs font-semibold uppercase tracking-wide text-text-muted">
           Tables
         </span>
+        <button
+          className="rail-btn h-5 w-5"
+          title="Open schema graph"
+          disabled={!activeConnectionId}
+          onClick={() => activeConnectionId && openGraph(activeConnectionId)}
+        >
+          <Workflow size={13} />
+        </button>
       </div>
       <div className="px-2 pb-2">
         <div className="flex items-center gap-1.5 rounded-sm border border-border bg-bg-primary px-2 py-1">

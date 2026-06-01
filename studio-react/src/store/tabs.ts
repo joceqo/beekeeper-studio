@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type TabKind = "table" | "query" | "connection";
+export type TabKind = "table" | "query" | "connection" | "graph";
 
 export interface Tab {
   id: string;
@@ -20,6 +20,7 @@ interface TabsState {
   openTable: (connectionId: string, schema: string, table: string) => void;
   openQuery: () => void;
   openConnection: () => void;
+  openGraph: (connectionId: string, schema?: string) => void;
   setActive: (id: string) => void;
   close: (id: string) => void;
   updateSql: (id: string, sql: string) => void;
@@ -80,6 +81,25 @@ export const useTabsStore = create<TabsState>((set, get) => ({
       return;
     }
     const tab: Tab = { id: nextId("conn"), kind: "connection", title: "New Connection" };
+    set((s) => ({ tabs: [...s.tabs, tab], activeId: tab.id }));
+  },
+
+  openGraph: (connectionId, schema) => {
+    const title = schema ? `Graph · ${schema}` : "Schema Graph";
+    const existing = get().tabs.find(
+      (t) => t.kind === "graph" && t.connectionId === connectionId && t.schema === schema
+    );
+    if (existing) {
+      set({ activeId: existing.id });
+      return;
+    }
+    const tab: Tab = {
+      id: nextId("graph"),
+      kind: "graph",
+      title,
+      connectionId,
+      schema,
+    };
     set((s) => ({ tabs: [...s.tabs, tab], activeId: tab.id }));
   },
 

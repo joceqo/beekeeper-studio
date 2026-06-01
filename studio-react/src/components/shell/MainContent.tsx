@@ -1,5 +1,6 @@
 import { useTabsStore } from "@/store/tabs";
 import { TableView } from "@/components/grid/TableView";
+import { SchemaGraphView } from "@/components/grid/SchemaGraphView";
 import { QueryEditor } from "@/components/editor/QueryEditor";
 import { ConnectionScreen } from "@/components/connection/ConnectionScreen";
 
@@ -24,6 +25,12 @@ export function MainContent() {
         schema={tab.schema!}
         table={tab.table!}
       />
+    );
+  }
+
+  if (tab.kind === "graph") {
+    return (
+      <SchemaGraphView key={tab.id} connectionId={tab.connectionId!} schema={tab.schema} />
     );
   }
 
