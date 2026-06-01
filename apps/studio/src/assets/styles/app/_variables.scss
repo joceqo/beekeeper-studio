@@ -1,10 +1,10 @@
 @use "sass:color";
 // Theme
 // -----------------------------
-$theme-bg:               #181818!default;
-$theme-base:             #fff!default;
-$theme-primary:          #fad83b!default;
-$theme-secondary:        #4ad0ff!default;
+$theme-bg:               #1e1e1e!default;
+$theme-base:             #e8e4dc!default;
+$theme-primary:          #d95200!default;
+$theme-secondary:        #5a9ebf!default;
 
 // Colors
 // -----------------------------
@@ -16,9 +16,9 @@ $text-hint:                 rgba($theme-base, 0.37)!default;
 $text-disabled:             rgba($theme-base, 0.37)!default;
 
 $brand-info:                $theme-secondary!default;
-$brand-success:             #15db95!default;
-$brand-warning:             #ff8d21!default;
-$brand-danger:              #ff5d59!default;
+$brand-success:             #5da050!default;
+$brand-warning:             #d98a35!default;
+$brand-danger:              #d94040!default;
 $brand-default:             rgba($theme-base, 0.57)!default;
 $brand-purple:              #9858ff!default;
 $brand-pink:                #ff78f7!default;
@@ -26,7 +26,7 @@ $brand-primary:             $theme-primary!default;
 $brand-secondary:           $theme-secondary!default;
 
 // App
-$border-color:              rgba($theme-base, 0.1)!default;
+$border-color:              #43433f!default;
 $link-color:                $text-dark!default;
 $placeholder:               $text-hint!default;
 $selection:                 rgba($theme-primary, 0.2)!default;
@@ -40,7 +40,7 @@ $row-handle-hover:          color.adjust($query-editor-bg, $lightness: 5%);
 
 $titlebar-bg:               transparent!default;
 $global-sidebar-bg:         transparent!default;
-$sidebar-bg:                color.adjust($theme-bg, $lightness: -3%)!default;
+$sidebar-bg:                #262626!default;
 $sidebar-heading-bg:        $theme-bg!default;
 $tabs-bg:                   transparent!default;
 $statusbar-bg:              rgba($theme-base, 0.1)!default;
@@ -84,7 +84,8 @@ $statusbar-height:          2.6rem;
 
 
 // text
-$font-family: system-ui,
+$font-family: "Inter Variable",
+          system-ui,
           -apple-system, BlinkMacSystemFont,
           "Segoe UI",
           "Roboto",
