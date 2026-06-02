@@ -412,3 +412,28 @@ highlight, email/phone/url links, rating stars, number/currency/% via Intl,
 date_relative, code mono), plus `inferSemanticType` (needs `get_table_stats`
 top_values via MCP) and the ColumnDetail TypePicker (override + scope). Builds
 on the header-icon work the drilldown agent is adding.
+
+## Exact column-header icon map (`pickSpriteName`, Lucide names)
+Priority: PK → FK → relation → semanticType → dataType fallback → text default.
+- isPK → `KeyRound` · isFK → `Link` · isRelation → `Workflow`
+- bool → `ToggleLeft` · cidr/ip_address → `Network` · code → `CodeXml`
+- color → `Palette` · currency → `DollarSign` · date_relative → `CalendarClock`
+- email → `Mail` · image_url → `Image` · json → `Braces` · number → `Hash`
+- percentage → `Percent` · phone → `Phone` · rating → `Star` · url → `Globe`
+- dataType fallback: int/serial/numeric/decimal/float/double/real/money → `Hash`;
+  bool → `ToggleLeft`; json → `Braces`; date/time/timestamp → `CalendarClock`
+- default (text) → `Type` (the "T")
+Grid header font = `Inter Variable` (mono is for values). Reused in DetailPanel.
+
+**Agent C — Column-header context menu + editable ROW panel:**
+- Right-click column header → menu (use the `Menu`/`ContextMenu` primitive):
+  `Sort ASC`, `Sort DESC`, `Filter…` (seed a FilterBar condition on that column),
+  `Copy Column Name`, `Copy Data Type`, `Hide Column` (columnConfig visibility),
+  `Configure…` (open the ColumnDetail panel for that column).
+- Make the ROW detail panel **editable**: per-type field editors — text Input,
+  number Input, bool → `SegmentedControl` (true/false/null), array `[...]`
+  expandable editor, json/code → popout editor with pencil, color → swatch +
+  hex. Edits stage and commit via a preview→confirm flow (SlashTable's
+  `preview_changes_sql` → `commit_changes`); for us, route through an UPDATE on
+  a write connection behind a confirm dialog (ties to the MCP write guard).
+  This is the "edit + preview/commit writes" step, surfaced via the ROW panel.
