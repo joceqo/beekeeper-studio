@@ -25,6 +25,16 @@ if (typeof window !== "undefined" && window.main) {
   };
 }
 
+// Safety net: a best-effort backend call that rejects without a local catch
+// would otherwise surface as an "Uncaught (in promise)" in the console. Log it
+// as a warning instead of letting it bubble up unhandled.
+if (typeof window !== "undefined") {
+  window.addEventListener("unhandledrejection", (e) => {
+    console.warn("[studio-react] unhandled rejection:", e.reason);
+    e.preventDefault();
+  });
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <App />

@@ -500,12 +500,12 @@ export class ElectronBackendClient implements BackendClient {
   }
 
   async getSchemaGraph(connectionId: string, schema?: string): Promise<SchemaGraph> {
+    const nodes: SchemaGraph["nodes"] = [];
+    const edges: SchemaGraph["edges"] = [];
+    try {
     await this.connect(connectionId);
     const tables = await this.listTables(connectionId, schema);
     const baseTables = tables.filter((t) => t.type === "table");
-
-    const nodes: SchemaGraph["nodes"] = [];
-    const edges: SchemaGraph["edges"] = [];
 
     const limit = 8;
     for (let i = 0; i < baseTables.length; i += limit) {
@@ -542,7 +542,9 @@ export class ElectronBackendClient implements BackendClient {
         })
       );
     }
-
+    } catch {
+      /* degrade to whatever nodes/edges were gathered before the failure */
+    }
     return { nodes, edges };
   }
 }
