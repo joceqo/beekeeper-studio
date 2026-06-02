@@ -77,6 +77,61 @@ export function Menu({ trigger, items, side = "bottom", align = "start" }: MenuP
   );
 }
 
+export interface AnchoredMenuProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** Screen-space rect (e.g. a click point or a header cell's bounds) to anchor to. */
+  anchorRect: { x: number; y: number; width?: number; height?: number } | null;
+  items: MenuEntry[];
+  side?: "top" | "bottom" | "left" | "right";
+  align?: "start" | "center" | "end";
+}
+
+/**
+ * Controlled menu anchored to an arbitrary screen rect rather than a DOM
+ * trigger. Used for the column-header context menu, where the anchor comes from
+ * Glide's `onHeaderMenuClick` bounds (or a right-click point) instead of a React
+ * element. Shares the same popup styling + item rendering as {@link Menu}.
+ */
+export function AnchoredMenu({
+  open,
+  onOpenChange,
+  anchorRect,
+  items,
+  side = "bottom",
+  align = "start",
+}: AnchoredMenuProps) {
+  const anchor = React.useMemo(() => {
+    if (!anchorRect) return undefined;
+    const { x, y, width = 0, height = 0 } = anchorRect;
+    return {
+      getBoundingClientRect: () =>
+        ({
+          x,
+          y,
+          width,
+          height,
+          top: y,
+          left: x,
+          right: x + width,
+          bottom: y + height,
+        }) as DOMRect,
+    };
+  }, [anchorRect]);
+
+  return (
+    <BaseMenu.Root open={open} onOpenChange={onOpenChange}>
+      <BaseMenu.Portal>
+        <BaseMenu.Positioner side={side} align={align} sideOffset={4} anchor={anchor}>
+          <BaseMenu.Popup className={popupClass}>
+            <MenuItems items={items} />
+          </BaseMenu.Popup>
+        </BaseMenu.Positioner>
+      </BaseMenu.Portal>
+    </BaseMenu.Root>
+  );
+}
+
 export interface ContextMenuProps {
   items: MenuEntry[];
   children: React.ReactNode;

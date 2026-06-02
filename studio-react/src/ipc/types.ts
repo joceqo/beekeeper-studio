@@ -205,6 +205,15 @@ export interface BackendClient {
   ): Promise<TableDescription>;
   getRecords(params: GetRecordsParams): Promise<RecordPage>;
   executeQuery(connectionId: string, sql: string): Promise<QueryResult>;
+  /**
+   * Run a mutating statement (UPDATE/INSERT/DELETE) on a WRITE connection.
+   * The MCP backend re-opens the connection with `access: "write"`; if the
+   * connection is read-only (or the MCP read guard is in effect) the call
+   * rejects with a clear, surface-able error. Backs the editable row panel's
+   * preview→commit flow. Implementations that cannot grant write access should
+   * reject rather than silently no-op.
+   */
+  executeWrite(connectionId: string, sql: string): Promise<QueryResult>;
   getSchemaGraph(connectionId: string, schema?: string): Promise<SchemaGraph>;
   /**
    * Best-effort related-row counts for a single source row, used to badge the

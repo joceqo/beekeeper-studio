@@ -10,7 +10,7 @@ import {
   PanelRightClose,
 } from "lucide-react";
 import { backend, type RecordPage, type TableDescription } from "@/ipc";
-import { DataGrid, type SortState } from "./DataGrid";
+import { DataGrid, type SortState, type SortDirection } from "./DataGrid";
 import { FilterBar } from "./FilterBar";
 import { DetailPanel } from "@/components/detail/DetailPanel";
 import { useActivityStore } from "@/store/activity";
@@ -19,6 +19,7 @@ import { useSelectionStore } from "@/store/selection";
 import { useDetailDockStore } from "@/store/detailDock";
 import { useTabsStore, type DrilldownCrumb } from "@/store/tabs";
 import { useFilterStore } from "@/store/filters";
+import { useColumnConfigStore } from "@/store/columnConfig";
 import { compileWhere } from "@/lib/filters";
 import {
   relationColumns,
@@ -65,9 +66,16 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
   const clearSelection = useSelectionStore((s) => s.clear);
   const dockOpen = useDetailDockStore((s) => s.open);
   const toggleDock = useDetailDockStore((s) => s.toggle);
+  const setDockOpen = useDetailDockStore((s) => s.setOpen);
   const dockWidth = useDetailDockStore((s) => s.width);
   const setDockWidth = useDetailDockStore((s) => s.setWidth);
   const openRelation = useTabsStore((s) => s.openRelation);
+
+  // Column-header context-menu actions (Agent C).
+  const addCondition = useFilterStore((s) => s.addCondition);
+  const updateNode = useFilterStore((s) => s.updateNode);
+  const getRoot = useFilterStore((s) => s.getRoot);
+  const setColumnHidden = useColumnConfigStore((s) => s.setHidden);
 
   // Virtual relation columns (outgoing parents + incoming children).
   const relations = useMemo<RelationColumn[]>(
@@ -143,6 +151,44 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
   const onNext = () => setOffset((o) => o + PAGE_SIZE);
   const hasNext = page ? page.loaded === PAGE_SIZE : false;
   const pageNum = Math.floor(offset / PAGE_SIZE) + 1;
+
+  // --- Column-header context-menu handlers (Agent C) ----------------------
+
+  const onSortColumn = useCallback((column: ColumnDef, direction: SortDirection) => {
+    setOffset(0);
+    setSort({ column: column.name, direction });
+  }, []);
+
+  // Seed a FilterBar condition on the column (an empty `equals` leaf the user
+  // fills in), reusing the filters store. Append rather than seedEquals so an
+  // existing filter tree is preserved.
+  const onFilterColumn = useCallback(
+    (column: ColumnDef) => {
+      const before = new Set(getRoot(tabId).children.map((c) => c.id));
+      addCondition(tabId, undefined, column.name);
+      // Default the new leaf to `is not null` so it contributes immediately and
+      // reads as an active filter the user can refine.
+      const after = getRoot(tabId).children.find((c) => !before.has(c.id));
+      if (after) updateNode(tabId, after.id, { operator: "is_not_null" });
+    },
+    [tabId, addCondition, updateNode, getRoot]
+  );
+
+  const onHideColumn = useCallback(
+    (column: ColumnDef) => {
+      setColumnHidden(tabId, column.name, true);
+    },
+    [tabId, setColumnHidden]
+  );
+
+  // Open the detail dock focused on the column (column-detail view).
+  const onConfigureColumn = useCallback(
+    (column: ColumnDef) => {
+      selectColumn(tabId, column.name);
+      setDockOpen(true);
+    },
+    [tabId, selectColumn, setDockOpen]
+  );
 
   // Resize the detail dock by dragging its left edge.
   const startResize = (e: React.MouseEvent) => {
@@ -318,6 +364,10 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
               onRelationClick={onRelationClick}
               description={description}
               onFkClick={onFkClick}
+              onSortColumn={onSortColumn}
+              onFilterColumn={onFilterColumn}
+              onHideColumn={onHideColumn}
+              onConfigureColumn={onConfigureColumn}
             />
           ) : null}
         </div>

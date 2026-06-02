@@ -1,13 +1,23 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import DataEditor, {
   GridCell,
   GridCellKind,
   GridColumn,
   GridSelection,
   Item,
+  Rectangle,
   Theme,
 } from "@glideapps/glide-data-grid";
 import "@glideapps/glide-data-grid/dist/index.css";
+import {
+  ArrowUpAZ,
+  ArrowDownAZ,
+  Filter,
+  Copy,
+  Type as TypeIcon,
+  EyeOff,
+  SlidersHorizontal,
+} from "lucide-react";
 import type { CellValue, ColumnDef, TableDescription } from "@/ipc";
 import {
   parseRef,
@@ -18,6 +28,7 @@ import {
 import { useThemeStore } from "@/store/theme";
 import { useColumnConfigStore, formatCellValue } from "@/store/columnConfig";
 import { HEADER_ICONS, headerIconKey } from "./headerIcons";
+import { AnchoredMenu, type MenuEntry } from "@/ui";
 
 /** Read a CSS custom property off the document root. */
 function token(name: string): string {
@@ -119,6 +130,38 @@ export interface DataGridProps {
   description?: TableDescription | null;
   /** Fired when an FK cell's value is clicked (§2), to drill into the parent row. */
   onFkClick?: (rowIndex: number, column: ColumnDef, value: CellValue) => void;
+  /**
+   * Column-header context-menu actions (Agent C). When supplied, data-column
+   * headers gain a menu indicator (right-click / the header ⋮ open the menu).
+   * Each handler receives the column it was invoked on.
+   */
+  onSortColumn?: (column: ColumnDef, direction: SortDirection) => void;
+  onFilterColumn?: (column: ColumnDef) => void;
+  onHideColumn?: (column: ColumnDef) => void;
+  onConfigureColumn?: (column: ColumnDef) => void;
+}
+
+/** Write text to the clipboard, with a synchronous fallback. */
+function copyText(text: string) {
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
+  } else {
+    fallbackCopy(text);
+  }
+}
+function fallbackCopy(text: string) {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand("copy");
+  } catch {
+    /* ignore */
+  }
+  document.body.removeChild(ta);
 }
 
 const REL_COL_PREFIX = "__rel__:";
@@ -136,10 +179,22 @@ export function DataGrid({
   onRelationClick,
   description,
   onFkClick,
+  onSortColumn,
+  onFilterColumn,
+  onHideColumn,
+  onConfigureColumn,
 }: DataGridProps) {
   // re-derive theme when app theme flips
   const theme = useThemeStore((s) => s.theme);
   const glide = useMemo(() => glideTheme(), [theme]);
+
+  // Column-header context menu (Agent C): a controlled, point-anchored menu.
+  const [headerMenu, setHeaderMenu] = useState<{
+    column: ColumnDef;
+    rect: { x: number; y: number; width?: number; height?: number };
+  } | null>(null);
+  const hasHeaderMenu =
+    !!onSortColumn || !!onFilterColumn || !!onHideColumn || !!onConfigureColumn;
 
   // Per-column display config (format + visibility) for this tab.
   const configByKey = useColumnConfigStore((s) => s.byKey);
@@ -183,6 +238,8 @@ export function DataGrid({
         width: colWidth(c),
         // Custom header icon by semantic type (§4); FK uses the accent color.
         icon: headerIconKey(sem),
+        // A menu indicator (the ⋮) opens the column-header context menu (Agent C).
+        hasMenu: hasHeaderMenu,
         themeOverride: sem === "fk" ? { fgIconHeader: token("--color-accent") } : undefined,
       };
     });
@@ -200,7 +257,7 @@ export function DataGrid({
       },
     }));
     return [...dataCols, ...relCols];
-  }, [visible, sort, relations, semanticOf]);
+  }, [visible, sort, relations, semanticOf, hasHeaderMenu]);
 
   const getCellContent = useCallback(
     ([col, row]: Item): GridCell => {
@@ -298,6 +355,77 @@ export function DataGrid({
     [visible, onSort, onColumnSelect]
   );
 
+  // Open the column-header context menu, anchored to the header cell's bounds
+  // (Glide gives screen-space `bounds` for the clicked header). Relation columns
+  // have no menu.
+  const onHeaderMenuClick = useCallback(
+    (colIndex: number, bounds: Rectangle) => {
+      if (!hasHeaderMenu) return;
+      if (colIndex >= visible.length) return;
+      const def = visible[colIndex]?.c;
+      if (!def) return;
+      onColumnSelect?.(def.name);
+      setHeaderMenu({
+        column: def,
+        rect: { x: bounds.x, y: bounds.y + bounds.height, width: bounds.width },
+      });
+    },
+    [hasHeaderMenu, visible, onColumnSelect]
+  );
+
+  // Build the menu entries for the focused header column.
+  const headerMenuItems = useMemo<MenuEntry[]>(() => {
+    const col = headerMenu?.column;
+    if (!col) return [];
+    const items: MenuEntry[] = [];
+    if (onSortColumn) {
+      items.push({
+        label: "Sort ASC",
+        icon: <ArrowUpAZ size={14} />,
+        onSelect: () => onSortColumn(col, "asc"),
+      });
+      items.push({
+        label: "Sort DESC",
+        icon: <ArrowDownAZ size={14} />,
+        onSelect: () => onSortColumn(col, "desc"),
+      });
+    }
+    if (onFilterColumn) {
+      items.push({
+        label: "Filter…",
+        icon: <Filter size={14} />,
+        onSelect: () => onFilterColumn(col),
+      });
+    }
+    if (items.length) items.push({ type: "separator" });
+    items.push({
+      label: "Copy Column Name",
+      icon: <Copy size={14} />,
+      onSelect: () => copyText(col.name),
+    });
+    items.push({
+      label: "Copy Data Type",
+      icon: <TypeIcon size={14} />,
+      onSelect: () => copyText(col.dataType),
+    });
+    if (onHideColumn || onConfigureColumn) items.push({ type: "separator" });
+    if (onHideColumn) {
+      items.push({
+        label: "Hide Column",
+        icon: <EyeOff size={14} />,
+        onSelect: () => onHideColumn(col),
+      });
+    }
+    if (onConfigureColumn) {
+      items.push({
+        label: "Configure…",
+        icon: <SlidersHorizontal size={14} />,
+        onSelect: () => onConfigureColumn(col),
+      });
+    }
+    return items;
+  }, [headerMenu, onSortColumn, onFilterColumn, onHideColumn, onConfigureColumn]);
+
   const onCellClicked = useCallback(
     ([col, row]: Item) => {
       // Relation cell → drill into related rows.
@@ -346,10 +474,21 @@ export function DataGrid({
         height="100%"
         getCellsForSelection
         onHeaderClicked={onHeaderClicked}
+        onHeaderMenuClick={hasHeaderMenu ? onHeaderMenuClick : undefined}
         onCellClicked={onCellClicked}
         onGridSelectionChange={onGridSelectionChange}
         keybindings={{ search: true }}
       />
+      {hasHeaderMenu && (
+        <AnchoredMenu
+          open={headerMenu != null}
+          onOpenChange={(o) => {
+            if (!o) setHeaderMenu(null);
+          }}
+          anchorRect={headerMenu?.rect ?? null}
+          items={headerMenuItems}
+        />
+      )}
     </div>
   );
 }
