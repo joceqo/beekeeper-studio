@@ -47,7 +47,7 @@ export function FilterBar({ tabId, columns }: Props) {
       <div className="flex h-8 items-center gap-2 px-2">
         <button
           className={cn(
-            "flex items-center gap-1.5 rounded-sm px-2 py-1 text-xs",
+            "flex items-center gap-1.5 rounded-sm px-2 py-1 text-xs transition-colors duration-100 ease-out",
             activeCount > 0
               ? "text-accent hover:bg-bg-hover"
               : "text-text-muted hover:bg-bg-hover hover:text-text-primary"

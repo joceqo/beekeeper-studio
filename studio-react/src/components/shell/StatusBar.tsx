@@ -7,11 +7,12 @@ export function StatusBar() {
   return (
     <div className="flex h-6 shrink-0 items-center justify-between border-t border-border bg-bg-secondary px-3 text-xs text-text-muted">
       <span>Free — Personal Use</span>
-      <div className="flex items-center gap-3">
-        <span className="font-mono">
+      <div className="flex items-center gap-2.5">
+        <span className="font-mono tabular-nums">
           {(elapsedMs / 1000).toFixed(2)}s · {loaded} loaded / ~{total} total
         </span>
-        <span>{VERSION}</span>
+        <span className="h-3 w-px bg-border" />
+        <span className="font-mono text-text-muted/80">{VERSION}</span>
       </div>
     </div>
   );

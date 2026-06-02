@@ -51,7 +51,7 @@ export function SegmentedControl<T extends string = string>({
           value={item.value}
           title={item.title}
           className={cn(
-            "flex items-center gap-1.5 rounded-sm px-3 py-1.5 text-sm font-medium outline-none transition-colors",
+            "flex items-center gap-1.5 rounded-sm px-3 py-1.5 text-sm font-medium outline-none transition-colors duration-100 ease-out",
             "text-text-secondary hover:text-text-primary",
             "data-[pressed]:bg-accent data-[pressed]:text-text-on-accent",
             "focus-visible:ring-1 focus-visible:ring-accent"
