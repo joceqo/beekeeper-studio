@@ -1,7 +1,19 @@
-import { useMemo } from "react";
-import { Link2, Eye, EyeOff, X } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import {
+  Link2,
+  Eye,
+  EyeOff,
+  X,
+  Pencil,
+  RotateCcw,
+  Plus,
+  Trash2,
+  AlertTriangle,
+  Check,
+} from "lucide-react";
 import type { CellValue, ColumnDef, TableDescription } from "@/ipc";
-import { semanticType } from "@/lib/relations";
+import { backend } from "@/ipc";
+import { semanticType, type SemanticType } from "@/lib/relations";
 import { SemanticIcon } from "@/components/grid/SemanticIcon";
 import { useTabsStore, type DrilldownCrumb } from "@/store/tabs";
 import {
@@ -9,7 +21,20 @@ import {
   FORMAT_LABELS,
   type ColumnFormat,
 } from "@/store/columnConfig";
-import { cn, IconButton, Button } from "@/ui";
+import {
+  usePendingEditsStore,
+  compilePreviewSql,
+  editKey,
+  type PendingEdit,
+} from "@/store/pendingEdits";
+import {
+  cn,
+  IconButton,
+  Button,
+  Input,
+  SegmentedControl,
+  Dialog,
+} from "@/ui";
 
 interface Props {
   tabId: string;
@@ -47,6 +72,12 @@ function NullValue() {
   return <span className="italic text-text-muted">NULL</span>;
 }
 
+/** Is this column an array type (`text[]`, `int[]`, `_uuid`, `ARRAY`)? */
+function isArrayType(c: ColumnDef): boolean {
+  const t = c.dataType.toLowerCase();
+  return t.endsWith("[]") || t.startsWith("_") || t.includes("array");
+}
+
 export function DetailPanel({
   tabId,
   connectionId,
@@ -64,8 +95,10 @@ export function DetailPanel({
   const openRelation = useTabsStore((s) => s.openRelation);
   const fks = useMemo(() => fkMap(description), [description]);
 
-  // Find this row's PK value, to anchor the breadcrumb origin crumb.
+  // Find this row's PK value, to anchor the breadcrumb origin crumb + target
+  // staged edits to a row (the UPDATE's WHERE).
   const pkIndex = columns.findIndex((c) => c.primaryKey);
+  const pkColumn = pkIndex >= 0 ? columns[pkIndex]?.name ?? null : null;
   const originKey = row && pkIndex >= 0 ? row[pkIndex] : null;
 
   const header = (
@@ -93,10 +126,16 @@ export function DetailPanel({
   } else if (mode === "row" && row) {
     body = (
       <RowDetail
+        tabId={tabId}
+        connectionId={connectionId}
+        schema={schema ?? "public"}
+        table={table ?? ""}
         columns={columns}
         row={row}
         rowIndex={rowIndex}
         fks={fks}
+        pkColumn={pkColumn}
+        pkValue={originKey}
         onFollowFk={(parsed, value) => {
           // Parent (N:1) drilldown: filter the referenced table to PK = value,
           // with a breadcrumb anchored at this source row.
@@ -136,56 +175,430 @@ export function DetailPanel({
   );
 }
 
-// --- Row detail (key -> value form) ----------------------------------------
+// --- Row detail (editable key -> value form) --------------------------------
 
 function RowDetail({
+  tabId,
+  connectionId,
+  schema,
+  table,
   columns,
   row,
   rowIndex,
   fks,
+  pkColumn,
+  pkValue,
   onFollowFk,
 }: {
+  tabId: string;
+  connectionId: string;
+  schema: string;
+  table: string;
   columns: ColumnDef[];
   row: CellValue[];
   rowIndex: number | null;
   fks: Map<string, string>;
+  pkColumn: string | null;
+  pkValue: CellValue;
   onFollowFk: (
     parsed: { schema?: string; table: string; column: string },
     value: CellValue
   ) => void;
 }) {
+  const byKey = usePendingEditsStore((s) => s.byKey);
+  const stage = usePendingEditsStore((s) => s.stage);
+  const revert = usePendingEditsStore((s) => s.revert);
+
+  // Staged edits for THIS row (matched on tab + pk value).
+  const rowEdits = useMemo(
+    () =>
+      Object.values(byKey).filter(
+        (e) => e.tabId === tabId && String(e.pkValue) === String(pkValue)
+      ),
+    [byKey, tabId, pkValue]
+  );
+  const stagedByColumn = useMemo(() => {
+    const m = new Map<string, PendingEdit>();
+    for (const e of rowEdits) m.set(e.column, e);
+    return m;
+  }, [rowEdits]);
+
+  // Writes need a PK to build a safe WHERE; without one, fields are read-only.
+  const editable = pkColumn != null && pkValue !== null && pkValue !== undefined;
+
+  const onChange = useCallback(
+    (column: ColumnDef, newValue: CellValue, originalValue: CellValue) => {
+      if (!editable || pkColumn == null) return;
+      stage({
+        tabId,
+        schema,
+        table,
+        pkColumn,
+        pkValue,
+        column: column.name,
+        originalValue,
+        newValue,
+      });
+    },
+    [editable, pkColumn, pkValue, schema, table, tabId, stage]
+  );
+
   return (
-    <div className="flex flex-col">
-      {rowIndex != null && (
-        <div className="px-3 py-2 font-mono text-xs text-text-muted">row #{rowIndex + 1}</div>
-      )}
-      <dl className="flex flex-col">
-        {columns.map((c, i) => {
-          const value = row[i];
-          const ref = fks.get(c.name);
-          return (
-            <div
-              key={c.name}
-              className="flex flex-col gap-0.5 border-b border-border/60 px-3 py-2"
-            >
-              <dt className="flex items-center gap-1.5">
-                <SemanticIcon type={semanticType(c, !!ref)} />
-                <span className="font-mono text-xs text-text-secondary">{c.name}</span>
-                <span className="ml-auto font-mono text-[10px] text-text-muted">{c.dataType}</span>
-              </dt>
-              <dd className="font-mono text-md break-words text-text-primary">
-                {value === null || value === undefined ? (
-                  <NullValue />
-                ) : ref ? (
-                  <FkLink value={value} reference={ref} onFollowFk={onFollowFk} />
-                ) : (
-                  String(value)
+    <div className="flex h-full flex-col">
+      <div className="min-h-0 flex-1 overflow-auto">
+        {rowIndex != null && (
+          <div className="px-3 py-2 font-mono text-xs text-text-muted">
+            row #{rowIndex + 1}
+            {!editable && (
+              <span className="ml-2 text-text-muted">
+                · no primary key — read-only
+              </span>
+            )}
+          </div>
+        )}
+        <dl className="flex flex-col">
+          {columns.map((c, i) => {
+            const original = row[i];
+            const ref = fks.get(c.name);
+            const staged = stagedByColumn.get(c.name);
+            const dirty = staged != null;
+            const value = dirty ? staged.newValue : original;
+            const sem = semanticType(c, !!ref);
+            return (
+              <div
+                key={c.name}
+                className={cn(
+                  "flex flex-col gap-1 border-b border-border/60 px-3 py-2",
+                  dirty && "bg-accent-subtle/40"
                 )}
-              </dd>
-            </div>
-          );
-        })}
-      </dl>
+              >
+                <dt className="flex items-center gap-1.5">
+                  <SemanticIcon type={sem} />
+                  <span className="font-mono text-xs text-text-secondary">{c.name}</span>
+                  {dirty && (
+                    <span
+                      className="h-1.5 w-1.5 rounded-full bg-accent"
+                      title="Unsaved change"
+                    />
+                  )}
+                  <span className="ml-auto font-mono text-[10px] text-text-muted">
+                    {c.dataType}
+                  </span>
+                  {dirty && (
+                    <IconButton
+                      aria-label={`Revert ${c.name}`}
+                      title="Revert this change"
+                      onClick={() => revert(tabId, pkValue, c.name)}
+                    >
+                      <RotateCcw size={12} />
+                    </IconButton>
+                  )}
+                </dt>
+                <dd className="font-mono text-md break-words text-text-primary">
+                  <FieldEditor
+                    column={c}
+                    sem={sem}
+                    value={value}
+                    fkRef={ref ?? null}
+                    editable={editable}
+                    onChange={(v) => onChange(c, v, original)}
+                    onFollowFk={onFollowFk}
+                  />
+                </dd>
+              </div>
+            );
+          })}
+        </dl>
+      </div>
+
+      <CommitBar tabId={tabId} connectionId={connectionId} />
+    </div>
+  );
+}
+
+// --- Per-type field editors -------------------------------------------------
+
+function FieldEditor({
+  column,
+  sem,
+  value,
+  fkRef,
+  editable,
+  onChange,
+  onFollowFk,
+}: {
+  column: ColumnDef;
+  sem: SemanticType;
+  value: CellValue;
+  fkRef: string | null;
+  editable: boolean;
+  onChange: (value: CellValue) => void;
+  onFollowFk: (
+    parsed: { schema?: string; table: string; column: string },
+    value: CellValue
+  ) => void;
+}) {
+  // FK values stay clickable links (drilldown), not editable here.
+  if (fkRef) {
+    return <FkLink value={value} reference={fkRef} onFollowFk={onFollowFk} />;
+  }
+
+  if (!editable) {
+    return value === null || value === undefined ? (
+      <NullValue />
+    ) : (
+      <span>{String(value)}</span>
+    );
+  }
+
+  // bool → true / false / null segmented control.
+  if (sem === "bool") {
+    const current =
+      value === null || value === undefined
+        ? "null"
+        : value === true || value === "true" || value === 1
+          ? "true"
+          : "false";
+    return (
+      <SegmentedControl<"true" | "false" | "null">
+        aria-label={`${column.name} value`}
+        value={current}
+        onValueChange={(v) => onChange(v === "null" ? null : v === "true")}
+        items={[
+          { value: "true", label: "true" },
+          { value: "false", label: "false" },
+          { value: "null", label: "null" },
+        ]}
+      />
+    );
+  }
+
+  // array → multi-value editor.
+  if (isArrayType(column)) {
+    return <ArrayEditor value={value} onChange={onChange} />;
+  }
+
+  // json / code → popout dialog editor with a pencil button.
+  if (sem === "json" || sem === "code") {
+    return <JsonEditor column={column} value={value} onChange={onChange} />;
+  }
+
+  // color → swatch + hex input.
+  if (sem === "color") {
+    return <ColorEditor value={value} onChange={onChange} />;
+  }
+
+  // number → numeric Input.
+  if (sem === "number" || sem === "currency" || sem === "percentage") {
+    return (
+      <Input
+        size="sm"
+        type="number"
+        value={value === null || value === undefined ? "" : String(value)}
+        placeholder="NULL"
+        onChange={(e) => {
+          const raw = e.target.value;
+          onChange(raw === "" ? null : Number(raw));
+        }}
+      />
+    );
+  }
+
+  // text default.
+  return (
+    <Input
+      size="sm"
+      value={value === null || value === undefined ? "" : String(value)}
+      placeholder="NULL"
+      onChange={(e) => onChange(e.target.value)}
+    />
+  );
+}
+
+/** Simple multi-value array editor: one Input per element + add/remove. */
+function ArrayEditor({
+  value,
+  onChange,
+}: {
+  value: CellValue;
+  onChange: (value: CellValue) => void;
+}) {
+  const items = useMemo(() => parseArray(value), [value]);
+  const setItems = (next: string[]) => onChange(formatArray(next));
+  return (
+    <div className="flex flex-col gap-1">
+      {items.length === 0 && (
+        <span className="italic text-text-muted">empty array</span>
+      )}
+      {items.map((item, i) => (
+        <div key={i} className="flex items-center gap-1">
+          <Input
+            size="sm"
+            value={item}
+            onChange={(e) => {
+              const next = items.slice();
+              next[i] = e.target.value;
+              setItems(next);
+            }}
+          />
+          <IconButton
+            aria-label="Remove item"
+            onClick={() => setItems(items.filter((_, j) => j !== i))}
+          >
+            <Trash2 size={12} />
+          </IconButton>
+        </div>
+      ))}
+      <Button
+        variant="subtle"
+        size="sm"
+        className="justify-start"
+        onClick={() => setItems([...items, ""])}
+      >
+        <Plus size={12} /> Add item
+      </Button>
+    </div>
+  );
+}
+
+/** Parse an array literal/string into a string[]. Best-effort. */
+function parseArray(value: CellValue): string[] {
+  if (value === null || value === undefined || value === "") return [];
+  const s = String(value).trim();
+  // JSON array form.
+  if (s.startsWith("[")) {
+    try {
+      const arr = JSON.parse(s) as unknown[];
+      if (Array.isArray(arr)) return arr.map((v) => String(v));
+    } catch {
+      /* fall through */
+    }
+  }
+  // Postgres `{a,b,c}` form.
+  if (s.startsWith("{") && s.endsWith("}")) {
+    const inner = s.slice(1, -1).trim();
+    if (inner === "") return [];
+    return inner.split(",").map((p) => p.trim().replace(/^"|"$/g, ""));
+  }
+  return s.split(",").map((p) => p.trim());
+}
+
+/** Render a string[] back as a Postgres array literal `{a,b,c}`. */
+function formatArray(items: string[]): string {
+  const escaped = items.map((i) => {
+    if (/[,{}"\s]/.test(i)) return `"${i.replace(/"/g, '\\"')}"`;
+    return i;
+  });
+  return `{${escaped.join(",")}}`;
+}
+
+/** json/code editor: a pencil opens a Dialog with a textarea + validation. */
+function JsonEditor({
+  column,
+  value,
+  onChange,
+}: {
+  column: ColumnDef;
+  value: CellValue;
+  onChange: (value: CellValue) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const text = value === null || value === undefined ? "" : String(value);
+  const [draft, setDraft] = useState(text);
+  const [jsonError, setJsonError] = useState<string | null>(null);
+
+  const preview = text === "" ? "NULL" : text.length > 80 ? text.slice(0, 80) + "…" : text;
+
+  return (
+    <div className="flex items-start gap-1">
+      <code className="min-w-0 flex-1 break-words rounded-sm bg-bg-secondary px-1.5 py-1 text-xs text-text-secondary">
+        {text === "" ? <NullValue /> : preview}
+      </code>
+      <IconButton
+        aria-label={`Edit ${column.name}`}
+        title="Edit value"
+        onClick={() => {
+          setDraft(text);
+          setJsonError(null);
+          setOpen(true);
+        }}
+      >
+        <Pencil size={12} />
+      </IconButton>
+      <Dialog
+        open={open}
+        onOpenChange={setOpen}
+        title={`Edit ${column.name}`}
+        description={column.dataType}
+        footer={
+          <>
+            <Button variant="subtle" size="sm" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                onChange(draft === "" ? null : draft);
+                setOpen(false);
+              }}
+            >
+              Apply
+            </Button>
+          </>
+        }
+      >
+        <textarea
+          className="h-64 w-full resize-none rounded-sm border border-border bg-bg-primary px-2.5 py-1.5 font-mono text-xs text-text-primary outline-none focus:border-accent focus:ring-1 focus:ring-accent/40"
+          value={draft}
+          spellCheck={false}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            // Validate JSON shape for json columns (advisory only).
+            if (column.dataType.toLowerCase().includes("json") && e.target.value.trim()) {
+              try {
+                JSON.parse(e.target.value);
+                setJsonError(null);
+              } catch (err) {
+                setJsonError(err instanceof Error ? err.message : "Invalid JSON");
+              }
+            } else {
+              setJsonError(null);
+            }
+          }}
+        />
+        {jsonError && (
+          <div className="mt-2 flex items-center gap-1.5 text-xs text-warning">
+            <AlertTriangle size={12} /> {jsonError}
+          </div>
+        )}
+      </Dialog>
+    </div>
+  );
+}
+
+/** color editor: a swatch + a hex Input. */
+function ColorEditor({
+  value,
+  onChange,
+}: {
+  value: CellValue;
+  onChange: (value: CellValue) => void;
+}) {
+  const hex = value === null || value === undefined ? "" : String(value);
+  const valid = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(hex);
+  return (
+    <div className="flex items-center gap-2">
+      <span
+        className="h-5 w-5 shrink-0 rounded-sm border border-border"
+        style={{ background: valid ? hex : "transparent" }}
+        title={valid ? hex : "no color"}
+      />
+      <Input
+        size="sm"
+        value={hex}
+        placeholder="#rrggbb"
+        onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)}
+      />
     </div>
   );
 }
@@ -203,6 +616,7 @@ function FkLink({
   ) => void;
 }) {
   const parsed = parseRef(reference);
+  if (value === null || value === undefined) return <NullValue />;
   return (
     <button
       className="inline-flex items-center gap-1 text-left text-info underline decoration-dotted underline-offset-2 hover:text-accent"
@@ -216,6 +630,131 @@ function FkLink({
       {String(value)}
       <Link2 size={11} />
     </button>
+  );
+}
+
+// --- Commit bar + preview dialog (preview → confirm → commit) ---------------
+
+function CommitBar({ tabId, connectionId }: { tabId: string; connectionId: string }) {
+  const byKey = usePendingEditsStore((s) => s.byKey);
+  const revertTab = usePendingEditsStore((s) => s.revertTab);
+  const clearKeys = usePendingEditsStore((s) => s.clearKeys);
+
+  // Recompute from byKey so the bar reacts to staging/revert.
+  const edits = useMemo(
+    () => Object.values(byKey).filter((e) => e.tabId === tabId),
+    [byKey, tabId]
+  );
+
+  const [open, setOpen] = useState(false);
+  const [committing, setCommitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  const previewSql = useMemo(() => compilePreviewSql(edits), [edits]);
+  const count = edits.length;
+
+  const onCommit = useCallback(async () => {
+    setCommitting(true);
+    setError(null);
+    try {
+      // Run each statement; surface the first failure inline.
+      const statements = previewSql.split("\n").filter((s) => s.trim() !== "");
+      for (const sql of statements) {
+        await backend.executeWrite(connectionId, sql);
+      }
+      // Drop the committed edits.
+      clearKeys(edits.map((e) => editKey(e.tabId, e.pkValue, e.column)));
+      setDone(true);
+      setTimeout(() => {
+        setDone(false);
+        setOpen(false);
+      }, 800);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCommitting(false);
+    }
+  }, [previewSql, connectionId, clearKeys, edits]);
+
+  if (count === 0) return null;
+
+  return (
+    <div className="flex shrink-0 items-center gap-2 border-t border-border bg-bg-secondary px-3 py-2">
+      <span className="flex items-center gap-1.5 text-xs text-text-secondary">
+        <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+        {count} unsaved {count === 1 ? "change" : "changes"}
+      </span>
+      <div className="ml-auto flex items-center gap-1.5">
+        <Button
+          variant="subtle"
+          size="sm"
+          onClick={() => revertTab(tabId)}
+          title="Discard all staged changes"
+        >
+          <RotateCcw size={12} /> Revert all
+        </Button>
+        <Button
+          size="sm"
+          onClick={() => {
+            setError(null);
+            setDone(false);
+            setOpen(true);
+          }}
+        >
+          Review changes
+        </Button>
+      </div>
+
+      <Dialog
+        open={open}
+        onOpenChange={(o) => {
+          if (!committing) setOpen(o);
+        }}
+        title="Review changes"
+        description={`${count} ${count === 1 ? "row" : "rows"} will be updated`}
+        className="max-w-2xl"
+        footer={
+          <>
+            <Button
+              variant="subtle"
+              size="sm"
+              disabled={committing}
+              onClick={() => setOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button size="sm" disabled={committing || done} onClick={onCommit}>
+              {done ? (
+                <>
+                  <Check size={13} /> Committed
+                </>
+              ) : committing ? (
+                "Committing…"
+              ) : (
+                "Commit"
+              )}
+            </Button>
+          </>
+        }
+      >
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
+          Generated SQL
+        </div>
+        <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-sm border border-border bg-bg-primary p-3 font-mono text-xs text-text-primary">
+          {previewSql}
+        </pre>
+        {error && (
+          <div className="mt-3 flex items-start gap-2 rounded-sm border border-danger/40 bg-danger/10 p-2.5 text-xs text-danger">
+            <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+            <div>
+              <div className="font-semibold">Commit failed</div>
+              <div className="mt-0.5 break-words font-mono">{error}</div>
+            </div>
+          </div>
+        )}
+      </Dialog>
+    </div>
   );
 }
 

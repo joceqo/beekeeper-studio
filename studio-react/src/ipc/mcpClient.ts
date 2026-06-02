@@ -111,6 +111,10 @@ export class McpBackendClient implements BackendClient {
   private readonly liveByUiId = new Map<string, string>();
   /** In-flight connect() calls keyed by UI id, to dedupe concurrent opens. */
   private readonly connecting = new Map<string, Promise<string>>();
+  /** Maps the UI connection id to a WRITE-access live MCP connectionId. */
+  private readonly writeByUiId = new Map<string, string>();
+  /** In-flight write-connect() calls keyed by UI id. */
+  private readonly writeConnecting = new Map<string, Promise<string>>();
 
   constructor(baseUrl = "http://127.0.0.1:27500/mcp") {
     this.baseUrl = baseUrl;
@@ -271,6 +275,35 @@ export class McpBackendClient implements BackendClient {
       })
       .finally(() => this.connecting.delete(uiId));
     this.connecting.set(uiId, promise);
+    return promise;
+  }
+
+  /**
+   * Resolve a WRITE-access live MCP connectionId for a UI connection id. Opens
+   * the saved connection with `access: "write"`; the backend's read/write guard
+   * decides whether write is granted. Errors propagate so the caller can surface
+   * "writes are disabled" to the user.
+   */
+  private async resolveWriteConnection(uiId: string): Promise<string> {
+    const cached = this.writeByUiId.get(uiId);
+    if (cached) return cached;
+
+    const inFlight = this.writeConnecting.get(uiId);
+    if (inFlight) return inFlight;
+
+    const savedId = savedIdFromUiId(uiId);
+    const args =
+      savedId == null
+        ? { connectionId: uiId, access: "write" }
+        : { savedConnectionId: savedId, access: "write" };
+
+    const promise = this.callTool<{ connectionId: string }>("connect", args)
+      .then((r) => {
+        this.writeByUiId.set(uiId, r.connectionId);
+        return r.connectionId;
+      })
+      .finally(() => this.writeConnecting.delete(uiId));
+    this.writeConnecting.set(uiId, promise);
     return promise;
   }
 
@@ -532,6 +565,44 @@ export class McpBackendClient implements BackendClient {
       columns,
       rows,
       rowCount: first?.rowCount ?? rows.length,
+      elapsedMs,
+      tables: table ? [table] : [],
+      operation: op,
+    };
+  }
+
+  async executeWrite(connectionId: string, sql: string): Promise<QueryResult> {
+    // Open (or reuse) a write-access connection. A read-only connection / the
+    // MCP read guard rejects the `connect` with access:"write" here.
+    let live: string;
+    try {
+      live = await this.resolveWriteConnection(connectionId);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new Error(
+        `Writes are disabled for this connection. The backend declined write access: ${msg}`
+      );
+    }
+    const started = performance.now();
+    const results = await this.callTool<
+      {
+        rowCount: number;
+        affectedRows: number | null;
+        fields: string[];
+        rows: Record<string, CellValue>[];
+        truncated: boolean;
+      }[]
+    >("execute_query", { connectionId: live, sql });
+    const elapsedMs = Math.round(performance.now() - started);
+
+    const first = results?.[0];
+    const op = (sql.trim().split(/\s+/)[0] || "UPDATE").toUpperCase();
+    const tableMatch = sql.match(/\b(?:from|join|into|update)\s+([a-z_"][\w".]*)/i);
+    const table = tableMatch ? tableMatch[1].replace(/"/g, "") : "";
+    return {
+      columns: [],
+      rows: [],
+      rowCount: first?.affectedRows ?? first?.rowCount ?? 0,
       elapsedMs,
       tables: table ? [table] : [],
       operation: op,

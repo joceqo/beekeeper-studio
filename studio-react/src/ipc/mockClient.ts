@@ -464,6 +464,26 @@ export class MockBackendClient implements BackendClient {
       operation: op,
     };
   }
+
+  /**
+   * Mock write path: the in-memory mock is always writable, so this just echoes
+   * a plausible affected-row count. (The real MCP client gates this behind the
+   * connection's read/write guard.)
+   */
+  async executeWrite(_connectionId: string, sql: string): Promise<QueryResult> {
+    await delay(jitter(200, 700));
+    const op = (sql.trim().split(/\s+/)[0] || "UPDATE").toUpperCase();
+    const tableMatch = sql.match(/\b(?:from|join|into|update)\s+([a-z_"][\w".]*)/i);
+    const table = tableMatch ? tableMatch[1].replace(/"/g, "") : "";
+    return {
+      columns: [],
+      rows: [],
+      rowCount: 1,
+      elapsedMs: Math.round(jitter(120, 400)),
+      tables: table ? [table] : [],
+      operation: op,
+    };
+  }
 }
 
 export const backend: BackendClient = new MockBackendClient();

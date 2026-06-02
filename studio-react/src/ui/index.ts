@@ -15,8 +15,10 @@ export { Popover, type PopoverProps } from "./Popover";
 export {
   Menu,
   ContextMenu,
+  AnchoredMenu,
   type MenuProps,
   type ContextMenuProps,
+  type AnchoredMenuProps,
   type MenuEntry,
   type MenuItemDef,
 } from "./Menu";
