@@ -32,6 +32,7 @@ import {
   type RelationColumn,
 } from "@/lib/relations";
 import { useRelationCounts } from "./useRelationCounts";
+import { useM2MRelations } from "./useM2MRelations";
 import { IconButton, Button, Tooltip } from "@/ui";
 
 interface Props {
@@ -93,6 +94,11 @@ export function RelationView({ tabId, connectionId, path }: Props) {
   const filterRoot = useFilterStore((s) => s.byTab[tabId]);
   const where = useMemo(() => compileWhere(filterRoot ?? null), [filterRoot]);
   const sql = useMemo(() => {
+    // Many-to-many hop: always join through the junction; the FilterBar's
+    // far-table conditions (when any) compose on top via `extraWhere`.
+    if (crumb.m2m) {
+      return drilldownSql(crumb, where);
+    }
     if (where) {
       const qualified = `"${schema.replace(/"/g, '""')}"."${table.replace(/"/g, '""')}"`;
       return `SELECT * FROM ${qualified} WHERE ${where} LIMIT 200`;
@@ -135,10 +141,12 @@ export function RelationView({ tabId, connectionId, path }: Props) {
 
   useEffect(load, [load]);
 
-  const relations = useMemo<RelationColumn[]>(
+  const baseRelations = useMemo<RelationColumn[]>(
     () => relationColumns(description),
     [description]
   );
+  // Collapse many-to-many junctions into far-table relations.
+  const relations = useM2MRelations(connectionId, baseRelations);
 
   // Page-level relation counts for the drilldown's rows (one grouped query per
   // relation). The page key is the drilldown SQL itself.
@@ -222,7 +230,19 @@ export function RelationView({ tabId, connectionId, path }: Props) {
         </div>
       </div>
 
-      <FilterBar tabId={tabId} columns={description?.columns ?? columns} />
+      <FilterBar
+        tabId={tabId}
+        columns={description?.columns ?? columns}
+        joinVia={
+          crumb.m2m
+            ? {
+                junction: crumb.m2m.junctionTable,
+                nearColumn: crumb.m2m.nearColumn,
+                nearValue: crumb.m2m.nearValue,
+              }
+            : undefined
+        }
+      />
 
       <div className="flex min-h-0 flex-1">
         <div className="relative min-h-0 min-w-0 flex-1">

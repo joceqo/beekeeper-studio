@@ -31,6 +31,7 @@ import {
 } from "@/lib/relations";
 import type { CellValue, ColumnDef } from "@/ipc";
 import { useRelationCounts } from "./useRelationCounts";
+import { useM2MRelations } from "./useM2MRelations";
 import { IconButton, Button, Tooltip } from "@/ui";
 
 interface Props {
@@ -82,10 +83,12 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
   const setColumnHidden = useColumnConfigStore((s) => s.setHidden);
 
   // Virtual relation columns (outgoing parents + incoming children).
-  const relations = useMemo<RelationColumn[]>(
+  const baseRelations = useMemo<RelationColumn[]>(
     () => relationColumns(description),
     [description]
   );
+  // Collapse many-to-many junctions into far-table relations.
+  const relations = useM2MRelations(connectionId, baseRelations);
 
   const load = useCallback(() => {
     setLoading(true);

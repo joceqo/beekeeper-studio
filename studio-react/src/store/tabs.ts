@@ -7,6 +7,25 @@ export type TabKind = "table" | "query" | "connection" | "graph" | "relation";
 export type RelationKind = "incoming" | "outgoing";
 
 /**
+ * A many-to-many hop through a detected join (junction) table. The drilldown
+ * lands on the FAR table but joins through the junction, so the crumb carries
+ * the junction join condition (`junction.nearColumn = nearValue`) and how the
+ * far table attaches (`far.farRefColumn = junction.farColumn`).
+ */
+export interface M2MCrumb {
+  junctionSchema: string;
+  junctionTable: string;
+  /** Junction column referencing the source row. */
+  nearColumn: string;
+  /** The source row's key value matched by `nearColumn`. */
+  nearValue: string | number;
+  /** Junction column referencing the far table. */
+  farColumn: string;
+  /** The far table's referenced column (what `farColumn` points at). */
+  farRefColumn: string;
+}
+
+/**
  * One hop in a relationship drilldown path. The first crumb is the origin row
  * (no relation); each subsequent crumb records the relation followed and the
  * filter applied to the target table.
@@ -24,6 +43,8 @@ export interface DrilldownCrumb {
   sourceKey?: string | number;
   /** Source table the relation was followed *from*. */
   sourceTable?: string;
+  /** When set, this hop traverses a many-to-many junction to the far table. */
+  m2m?: M2MCrumb;
 }
 
 /**
@@ -46,6 +67,10 @@ export interface DrilldownNode {
   recordKey?: string | number;
   /** Source table the relation was followed from (for labels). */
   sourceTable?: string;
+  /** Junction table name when this hop traversed a many-to-many relation. */
+  via?: string;
+  /** The many-to-many join condition, carried so the active path can rebuild it. */
+  m2m?: M2MCrumb;
   children: DrilldownNode[];
   /** Which child is currently active (the branch being viewed). */
   activeChildId?: string;
@@ -143,6 +168,8 @@ function nodeFromCrumb(c: DrilldownCrumb): DrilldownNode {
     // The origin crumb pins its source row; relation hops pin their filter value.
     recordKey: c.relation === "outgoing" ? c.filterValue : c.sourceKey,
     sourceTable: c.sourceTable,
+    via: c.m2m?.junctionTable,
+    m2m: c.m2m,
     children: [],
   };
 }
@@ -201,6 +228,7 @@ function activePath(tree: DrilldownNode, activeNodeId: string): DrilldownCrumb[]
       relation: n.relation,
       sourceKey: n.recordKey,
       sourceTable: n.sourceTable,
+      m2m: n.m2m,
     });
   }
   return crumbs;
