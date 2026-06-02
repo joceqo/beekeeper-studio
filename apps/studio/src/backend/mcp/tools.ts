@@ -203,9 +203,10 @@ export function createTools(deps: ToolDeps): McpTool[] {
       name: "connect",
       description:
         "Open a saved database connection by its savedConnectionId (from list_saved_connections). " +
-        "By default the connection opens at its saved AI-access level; pass access='read' to allow " +
-        "only SELECT/WITH/EXPLAIN/SHOW, or access='write' to allow any SQL including INSERT/UPDATE/DELETE " +
-        "and DDL. Read connections are also opened in the driver's read-only mode (enforced below the SQL " +
+        "By default the connection opens at its saved AI-access level. The saved level is a ceiling: " +
+        "you may pass access='read' to further restrict a write-enabled connection to read-only for this " +
+        "session, but you cannot widen beyond the saved level (requesting 'write' on a read connection is " +
+        "refused). Read connections are also opened in the driver's read-only mode (enforced below the SQL " +
         "guard). Connections whose AI access is Hidden cannot be opened. Returns the connectionId to pass " +
         "to the other tools. Idempotent; calling again with a different access reopens the connection.",
       inputSchema: {
@@ -227,12 +228,12 @@ export function createTools(deps: ToolDeps): McpTool[] {
           return fail(`No saved connection with id ${savedId}`);
         }
 
-        // Default to the connection's saved AI-access level; an explicit arg
-        // overrides it. Hidden connections are never openable over MCP.
+        // Default to the connection's saved AI-access level (a ceiling): an
+        // explicit arg may only narrow it. Hidden connections are never openable.
         const saved = normalizeMcpAccess(config.mcpAccess, defaultAccess);
         const resolved = resolveConnectAccess(saved, args.access as McpAccess | undefined);
         if (resolved.refused) {
-          return fail(`Connection ${savedId} is not exposed over MCP (${resolved.reason}).`);
+          return fail(`Cannot open connection ${savedId} over MCP: ${resolved.reason}.`);
         }
         const access = resolved.access;
 

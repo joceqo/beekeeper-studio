@@ -42,12 +42,23 @@ describe("resolveConnectAccess", () => {
     expect(resolveConnectAccess("write")).toEqual({ access: "write", refused: false });
   });
 
-  it("lets an explicit requested level override the saved level", () => {
+  it("allows narrowing the saved level (write connection opened read-only)", () => {
     expect(resolveConnectAccess("write", "read")).toEqual({ access: "read", refused: false });
-    expect(resolveConnectAccess("read", "write")).toEqual({ access: "write", refused: false });
   });
 
-  it("gives a reason when refusing", () => {
+  it("refuses widening beyond the saved level (write on a read connection)", () => {
+    const resolution = resolveConnectAccess("read", "write");
+    expect(resolution.refused).toBe(true);
+    expect(resolution.access).toBe("read");
+    expect(resolution.reason).toMatch(/limited to 'read'/);
+  });
+
+  it("allows requesting exactly the saved level", () => {
+    expect(resolveConnectAccess("read", "read")).toEqual({ access: "read", refused: false });
+    expect(resolveConnectAccess("write", "write")).toEqual({ access: "write", refused: false });
+  });
+
+  it("gives a reason when refusing a hidden connection", () => {
     const resolution = resolveConnectAccess("none");
     expect(resolution.reason).toMatch(/hidden/i);
   });
