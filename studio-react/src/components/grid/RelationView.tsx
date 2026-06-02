@@ -18,7 +18,8 @@ import { DetailPanel } from "@/components/detail/DetailPanel";
 import { useActivityStore } from "@/store/activity";
 import { useStatusStore } from "@/store/status";
 import { useSelectionStore } from "@/store/selection";
-import { useDetailDockStore } from "@/store/detailDock";
+import { useLayoutStore } from "@/store/layout";
+import { DetailDockPortal } from "@/components/shell/DetailDock";
 import { useTabsStore, type DrilldownCrumb } from "@/store/tabs";
 import { useFilterStore } from "@/store/filters";
 import { compileWhere } from "@/lib/filters";
@@ -73,10 +74,8 @@ export function RelationView({ tabId, connectionId, path }: Props) {
   const selectRow = useSelectionStore((s) => s.selectRow);
   const selectColumn = useSelectionStore((s) => s.selectColumn);
   const clearSelection = useSelectionStore((s) => s.clear);
-  const dockOpen = useDetailDockStore((s) => s.open);
-  const toggleDock = useDetailDockStore((s) => s.toggle);
-  const dockWidth = useDetailDockStore((s) => s.width);
-  const setDockWidth = useDetailDockStore((s) => s.setWidth);
+  const dockOpen = !useLayoutStore((s) => s.detailCollapsed);
+  const toggleDock = () => useLayoutStore.getState().toggle("detail");
 
   // Each drilldown step seeds its join condition (fk=value / pk=value) into the
   // linked FilterBar (§3), so the join filter is visible and editable. Seeded
@@ -188,19 +187,6 @@ export function RelationView({ tabId, connectionId, path }: Props) {
     [description, schema, table, connectionId, path, openRelation]
   );
 
-  const startResize = (e: React.MouseEvent) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startW = dockWidth;
-    const move = (ev: MouseEvent) => setDockWidth(startW - (ev.clientX - startX));
-    const up = () => {
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
-    };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
-  };
-
   const selectedRow =
     selection.rowIndex != null ? rows[selection.rowIndex] ?? null : null;
 
@@ -274,30 +260,24 @@ export function RelationView({ tabId, connectionId, path }: Props) {
         </div>
 
         {dockOpen && (
-          <>
-            <div
-              className="w-px shrink-0 cursor-col-resize bg-border hover:bg-accent"
-              onMouseDown={startResize}
+          <DetailDockPortal>
+            <DetailPanel
+              tabId={tabId}
+              connectionId={connectionId}
+              schema={schema}
+              table={table}
+              columns={columns}
+              row={selectedRow}
+              rowIndex={selection.rowIndex}
+              columnName={selection.columnName}
+              mode={selection.mode}
+              description={description}
+              onClose={() => {
+                clearSelection(tabId);
+                toggleDock();
+              }}
             />
-            <div className="shrink-0" style={{ width: dockWidth }}>
-              <DetailPanel
-                tabId={tabId}
-                connectionId={connectionId}
-                schema={schema}
-                table={table}
-                columns={columns}
-                row={selectedRow}
-                rowIndex={selection.rowIndex}
-                columnName={selection.columnName}
-                mode={selection.mode}
-                description={description}
-                onClose={() => {
-                  clearSelection(tabId);
-                  toggleDock();
-                }}
-              />
-            </div>
-          </>
+          </DetailDockPortal>
         )}
       </div>
     </div>

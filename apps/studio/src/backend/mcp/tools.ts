@@ -93,6 +93,63 @@ function accessFor(sId: string, defaultAccess: McpAccess): McpAccess {
 }
 
 /** Resolve a connection by sId, throwing if it isn't exposed/connected. */
+/**
+ * Best-effort per-table estimated row counts for `list_tables`. Uses the
+ * database's planner statistics (cheap, no count(*)). Postgres-family only for
+ * now (pg_class.reltuples); other dialects return an empty map so the caller
+ * reports `estimatedRows: null`. Any failure (permissions, odd dialect) is
+ * swallowed and degrades to no estimates.
+ *
+ * TODO: add MySQL (information_schema.tables.table_rows) and SQLite
+ * (sqlite_stat1) estimators when those backends need the explorer counts.
+ *
+ * Returns a Map keyed by `"<schema>.<table>"`.
+ */
+async function estimateRowCounts(
+  sId: string,
+  connectionType: string | undefined,
+  tables: { schema: string | null | undefined; name: string }[]
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (!tables.length) return out;
+  const isPg =
+    connectionType === "postgresql" ||
+    connectionType === "redshift" ||
+    connectionType === "cockroachdb";
+  if (!isPg) return out;
+  try {
+    // reltuples is the planner's estimate; GREATEST(.,0) guards the -1 ("never
+    // analyzed") sentinel. Join to pg_namespace for the schema qualifier.
+    const sql =
+      "SELECT n.nspname AS schema, c.relname AS name, " +
+      "GREATEST(c.reltuples, 0)::bigint AS estimate " +
+      "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace " +
+      "WHERE c.relkind IN ('r','p','m')";
+    const results = await ConnHandlers["conn/executeQuery"]({
+      queryText: sql,
+      options: {},
+      sId,
+    });
+    const rows = (results?.[0]?.rows ?? []) as Record<string, unknown>[];
+    const wanted = new Set(tables.map((t) => `${t.schema ?? ""}.${t.name}`));
+    for (const r of rows) {
+      const schema = r.schema == null ? "" : String(r.schema);
+      const name = String(r.name);
+      const key = `${schema}.${name}`;
+      // Match either schema-qualified or (when the listing omits schema) bare name.
+      if (!wanted.has(key) && !wanted.has(`.${name}`)) continue;
+      const n = Number(r.estimate);
+      if (Number.isFinite(n)) {
+        out.set(key, n);
+        out.set(`.${name}`, n);
+      }
+    }
+  } catch (e) {
+    log.debug("estimateRowCounts failed; reporting null estimates", e);
+  }
+  return out;
+}
+
 function requireExposed(sId: string, defaultAccess: McpAccess) {
   const s = state(sId);
   if (!s || !s.connection) {
@@ -265,15 +322,36 @@ export function createTools(deps: ToolDeps): McpTool[] {
       },
       async handler(args) {
         const sId = String(args.connectionId);
-        requireExposed(sId, defaultAccess);
+        const { s } = requireExposed(sId, defaultAccess);
         const filter = args.schema ? { schema: String(args.schema) } : undefined;
         const [tables, views] = await Promise.all([
           ConnHandlers["conn/listTables"]({ filter, sId }),
           ConnHandlers["conn/listViews"]({ filter, sId }),
         ]);
+        // Best-effort per-table estimated row counts (cheap — from the planner
+        // statistics, never count(*)). Currently Postgres-family only via
+        // pg_class.reltuples; other dialects report null. Failures degrade to
+        // null so the listing never breaks.
+        const estimates = await estimateRowCounts(
+          sId,
+          s.usedConfig?.connectionType,
+          tables.map((t) => ({ schema: t.schema, name: t.name }))
+        );
+        const estimateOf = (schema: string | null | undefined, name: string): number | null =>
+          estimates.get(`${schema ?? ""}.${name}`) ?? null;
         return ok({
-          tables: tables.map((t) => ({ name: t.name, schema: t.schema, entityType: "table" })),
-          views: views.map((v) => ({ name: v.name, schema: v.schema, entityType: "view" })),
+          tables: tables.map((t) => ({
+            name: t.name,
+            schema: t.schema,
+            entityType: "table",
+            estimatedRows: estimateOf(t.schema, t.name),
+          })),
+          views: views.map((v) => ({
+            name: v.name,
+            schema: v.schema,
+            entityType: "view",
+            estimatedRows: null,
+          })),
         });
       },
     },

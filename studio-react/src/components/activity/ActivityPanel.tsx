@@ -4,44 +4,34 @@ import {
   useActivityStore,
   type ActivityCategory,
 } from "@/store/activity";
+import { useLayoutStore } from "@/store/layout";
 import { cn, IconButton, Button, Badge } from "@/ui";
 import { ActivityLogTable } from "./ActivityLogTable";
 
+/**
+ * The Activity log. It lives in a collapsible Panel (vertical group in
+ * App.tsx); the panel owns sizing + collapse, so this component no longer
+ * hand-rolls a height/resize. The collapse toggle drives the panel via the
+ * layout store's imperative API.
+ */
 export function ActivityPanel() {
-  const collapsed = useActivityStore((s) => s.collapsed);
-  const height = useActivityStore((s) => s.height);
   const active = useActivityStore((s) => s.activeCategory);
   const unseen = useActivityStore((s) => s.unseen);
   const setCategory = useActivityStore((s) => s.setCategory);
-  const toggleCollapsed = useActivityStore((s) => s.toggleCollapsed);
-  const setHeight = useActivityStore((s) => s.setHeight);
   const clear = useActivityStore((s) => s.clear);
 
-  const startResize = (e: React.MouseEvent) => {
-    e.preventDefault();
-    const startY = e.clientY;
-    const startH = height;
-    const move = (ev: MouseEvent) => setHeight(startH + (startY - ev.clientY));
-    const up = () => {
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
-    };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
+  const collapsed = useLayoutStore((s) => s.activityCollapsed);
+  const toggle = useLayoutStore((s) => s.toggle);
+  const expandActivity = () => {
+    if (collapsed) toggle("activity");
   };
 
   return (
-    <div className="shrink-0 border-t border-border bg-bg-secondary">
-      {!collapsed && (
-        <div
-          className="h-1 cursor-row-resize bg-transparent hover:bg-accent/40"
-          onMouseDown={startResize}
-        />
-      )}
+    <div className="flex h-full flex-col border-t border-border bg-bg-secondary">
       {/* header / tab bar */}
-      <div className="flex h-8 items-center gap-0.5 px-1.5">
+      <div className="flex h-8 shrink-0 items-center gap-0.5 px-1.5">
         <IconButton
-          onClick={toggleCollapsed}
+          onClick={() => toggle("activity")}
           aria-label={collapsed ? "Expand activity" : "Collapse activity"}
         >
           {collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
@@ -57,7 +47,7 @@ export function ActivityPanel() {
               key={c}
               onClick={() => {
                 setCategory(c);
-                if (collapsed) toggleCollapsed();
+                expandActivity();
               }}
               className={cn(
                 "relative flex h-8 items-center gap-1.5 px-2.5 text-md",
@@ -87,7 +77,7 @@ export function ActivityPanel() {
       </div>
 
       {!collapsed && (
-        <div style={{ height }} className="border-t border-border">
+        <div className="min-h-0 flex-1 border-t border-border">
           <ActivityLogTable />
         </div>
       )}

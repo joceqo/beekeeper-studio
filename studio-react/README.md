@@ -106,9 +106,12 @@ the `mcp-session-id` header), then `tools/call`s `list_saved_connections` /
 - `@xyflow/react` (+ `dagre` for directed auto-layout) — the schema
   relationship graph (FK edges, cardinality, M2M join-table detection)
 - `@monaco-editor/react` — the SQL editor
+- **`react-resizable-panels`** — the whole app-shell layout (sidebar / main /
+  detail dock + grid / activity vertical split). Replaced all hand-rolled
+  mouse-drag resize. See "App-shell layout" below.
 - `lucide-react` — icons
 - Inter Variable / JetBrains Mono Variable (`@fontsource-variable/*`)
-- Zustand — state (tabs, sidebar, theme, activity log, status)
+- Zustand — state (tabs, sidebar, theme, activity log, status, layout)
 
 > Radix UI has been removed from the source. Base UI is the headless-primitive
 > layer now. (`@radix-ui/react-dialog` may still appear in `yarn.lock` as a
@@ -149,7 +152,9 @@ These screens now use the `src/ui` primitives instead of raw
 - **App root** — `TooltipProvider` + Sonner `Toaster` mounted once
 - **TitleBar** — theme/settings `IconButton`s + `Tooltip`
 - **TabStrip** — close + new-tab `IconButton`s + `Tooltip`
-- **Sidebar** — rail/header `IconButton`s, `Tooltip`s, env-tag `Badge`s
+- **Sidebar** — rail/header `IconButton`s, `Tooltip`s, env-tag `Badge`s,
+  folder-grouped connections + paint dots, schema/prefix Explorer folders with
+  counts + per-table row estimates (mono)
 - **Grid toolbar** (TableView + RelationView) — refresh/sort/insert/paging/dock
   `IconButton`s + `Tooltip`s, Retry `Button`
 - **FilterBar** — column/operator `Select`s, value `Input`s, add/remove
@@ -173,8 +178,9 @@ These screens now use the `src/ui` primitives instead of raw
 - The **DetailPanel format pills** (Text/Number/Currency/…) are bespoke
   active/inactive bordered buttons; a future `SegmentedControl` or `ToggleGroup`
   pass could unify them.
-- **Connection / table list rows** in the sidebar remain layout-specific
-  `<button>`s (multi-slot rows with icons, tags, status dots) — fine as-is.
+- **Connection / table list rows** in the sidebar are layout-specific
+  `<button>`s (multi-slot rows with icons, tags, paint dots, counts) — fine
+  as-is.
 - **StatusBar** is text-only (no controls to migrate).
 - **Dialog / Drawer / Combobox / Popover / Menu / ContextMenu / Switch** are
   built and exported but not yet adopted anywhere (no current feature needs
@@ -209,13 +215,62 @@ These screens now use the `src/ui` primitives instead of raw
   demand, with `get_schema_graph(rootTable, depth)`. Left as a separate
   follow-up per the spec; `SchemaGraphView` still renders the full graph.
 
+## App-shell layout (react-resizable-panels)
+
+The whole shell is a `PanelGroup` tree in [`App.tsx`](src/App.tsx); there is no
+hand-rolled mouse-drag resize anywhere anymore.
+
+```
+PanelGroup horizontal (autoSaveId "studio-react.layout.horizontal")
+├─ Panel  sidebar   collapsible, min 12 / max 32     → <Sidebar/>
+├─ PanelResizeHandle (thin token line, accent on hover/drag)
+├─ Panel  main      min 30
+│   └─ PanelGroup vertical (autoSaveId "studio-react.layout.vertical")
+│      ├─ Panel content   → <MainContent/> (grid / editor / graph / connection)
+│      ├─ PanelResizeHandle
+│      └─ Panel activity   collapsible          → <ActivityPanel/>
+├─ PanelResizeHandle
+└─ Panel  detail    collapsible, min 14 / max 40   → detail-dock portal host
+```
+
+- **Sizes** persist automatically via the two `autoSaveId`s (localStorage).
+- **Collapse** is wired through [`store/layout.ts`](src/store/layout.ts): each
+  collapsible Panel registers its `ImperativePanelHandle` and mirrors its
+  collapsed state (synced from `onCollapse`/`onExpand`, persisted). The existing
+  toggle buttons (sidebar collapse, detail-dock toggle in the grid toolbar,
+  activity collapse chevron) now call `layout.toggle("sidebar"|"detail"|"activity")`,
+  which collapses/expands the Panel via that handle.
+- **Detail dock** is a structural Panel in the shell, but its *content*
+  (`DetailPanel`) still comes from the active grid view (TableView /
+  RelationView) since it depends on that view's page/selection/description.
+  Rather than lift all of that into the shell, the dock Panel exposes a portal
+  host ([`DetailDock.tsx`](src/components/shell/DetailDock.tsx)) and views
+  teleport their `DetailPanel` into it with `createPortal`. So the layout owns
+  sizing/collapse while the per-view detail logic is untouched.
+- The old per-feature resize state (`sidebar.width`, `activity.height`,
+  `detailDock.width` + their drag handlers) was removed; `store/detailDock.ts`
+  was deleted.
+
 ## What's in the UI
 
 - **Title bar + tab strip** — table / query / connection tabs, active tab uses
   the burnt-orange accent and an underline; `+` opens a new query tab.
-- **Collapsible sidebar** — CONNECTIONS (mock: `mlc local`, `mlc remote` with a
-  red `PRD` tag, `CLICKY`) and TABLES with a search box; collapses to a thin
-  icon rail.
+- **Collapsible sidebar (SlashTable parity)** — a resizable Panel (see
+  "App-shell layout") that collapses to a thin icon rail. Everything is
+  JetBrains Mono.
+  - **CONNECTIONS** are grouped into **folders** (mock: `Demo` ▸ mlc local
+    `DEV` / ecommerce `TST`, `Production` ▸ mlc remote `PRD`, plus loose
+    `CLICKY`). Each connection shows a colored env-**tag** `Badge` and a
+    **paint** dot (`Connection.paint`); the active connection is highlighted.
+    Real MCP connections have no folders/tags — they render flat, which is fine.
+  - **EXPLORER** renders tables under a **schema folder** (`public`, …) showing
+    the schema's table count on the right; within a schema, tables are
+    **prefix-grouped** into collapsible sub-folders via a snake_case tokenizer
+    (`achievements` + `achievement_categories` → an `achievements` group), with
+    **join-tables-last** + **public-first** ordering
+    ([`lib/explorer.ts`](src/lib/explorer.ts)). Each table shows its
+    **estimated row count** on the right (`57.7K`, `882K`). Collapse state for
+    every folder/group is persisted (`store/sidebar.ts`).
 - **Data grid** — Glide canvas grid with ~50+ mock rows for `public.users`
   (id / email / username / …), smooth scrolling, NULL styling, typed cells.
 - **Relationship drilldown v2** (SlashTable's #1 differentiator) — related
@@ -255,8 +310,9 @@ These screens now use the `src/ui` primitives instead of raw
   engine refines a **drilldown** tab: the FilterBar's WHERE is `AND`-ed onto the
   crumb's pinned `fk = value` condition. The mock backend honours a useful subset
   (equals/comparisons/contains/in/null) so the bar visibly filters offline.
-- **Right detail dock** — collapsible + resizable panel docked on the right of
-  the grid (toggle in the table toolbar, persisted). Two modes driven by grid
+- **Right detail dock** — a collapsible, resizable Panel in the app-shell
+  layout (toggle in the table toolbar; size + collapse persisted by
+  react-resizable-panels). Two modes driven by grid
   selection: **Row detail** (select a row) shows a vertical key→value form with
   column name / type / value, NULLs styled, and foreign-key values rendered as
   clickable links that trigger the relationship drilldown (open the referenced
@@ -267,7 +323,8 @@ These screens now use the `src/ui` primitives instead of raw
   when the Glide grid renders that column.
 - **Query editor** — Monaco with a Run button and a results grid below
   (resizable splitter); themed to match the app.
-- **Activity panel** — resizable + collapsible bottom dock; category tabs
+- **Activity panel** — a collapsible Panel in the main column's vertical split
+  (size + collapse persisted); category tabs
   `[SQL][App][MCP ①][User][System][Connections]` with unseen-count badges and
   an active orange underline; log table with Time / Ctg / Op / Connection /
   Tables / SQL / Duration / Rows; click a row to expand the SQL; Clear button.
@@ -292,6 +349,9 @@ interface BackendClient {
   // before any schema/data call so requests never fire with an unresolved id.
   connect(connectionId): Promise<string>;
   listSchemas(connectionId): Promise<Schema[]>;
+  // TableSummary.rowEstimate is the per-table estimated row count shown in the
+  // Explorer. The MCP list_tables tool now returns `estimatedRows` (Postgres:
+  // pg_class.reltuples, cheap, no count(*)); the mcpClient surfaces it.
   listTables(connectionId, schema?): Promise<TableSummary[]>;
   // describeTable also returns incomingForeignKeys (child tables referencing
   // this one) alongside outgoing foreignKeys — drives the 1:N relation columns.

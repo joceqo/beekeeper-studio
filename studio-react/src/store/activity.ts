@@ -32,8 +32,6 @@ export interface ActivityEntry {
 const MAX = 1000;
 
 interface ActivityState {
-  collapsed: boolean;
-  height: number;
   activeCategory: ActivityCategory;
   entries: ActivityEntry[];
   /** unseen-per-category counts since last viewed */
@@ -41,8 +39,6 @@ interface ActivityState {
   push: (e: Omit<ActivityEntry, "id" | "time">) => void;
   clear: () => void;
   setCategory: (c: ActivityCategory) => void;
-  toggleCollapsed: () => void;
-  setHeight: (h: number) => void;
 }
 
 let id = 0;
@@ -74,8 +70,6 @@ const emptyUnseen = (): Record<ActivityCategory, number> => ({
 });
 
 export const useActivityStore = create<ActivityState>((set, get) => ({
-  collapsed: false,
-  height: 240,
   activeCategory: "User",
   entries: seed(),
   unseen: emptyUnseen(),
@@ -85,7 +79,9 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     set((s) => {
       const entries = [...s.entries, entry].slice(-MAX);
       const unseen = { ...s.unseen };
-      if (s.activeCategory !== entry.category || s.collapsed) {
+      // Count as unseen unless this is the active category (the panel may be
+      // collapsed; the badge still nudges the user to look).
+      if (s.activeCategory !== entry.category) {
         unseen[entry.category] = (unseen[entry.category] || 0) + 1;
       }
       return { entries, unseen };
@@ -105,7 +101,4 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       activeCategory: c,
       unseen: { ...s.unseen, [c]: 0 },
     })),
-
-  toggleCollapsed: () => set((s) => ({ collapsed: !s.collapsed })),
-  setHeight: (h) => set({ height: Math.max(120, Math.min(560, h)) }),
 }));

@@ -16,7 +16,8 @@ import { DetailPanel } from "@/components/detail/DetailPanel";
 import { useActivityStore } from "@/store/activity";
 import { useStatusStore } from "@/store/status";
 import { useSelectionStore } from "@/store/selection";
-import { useDetailDockStore } from "@/store/detailDock";
+import { useLayoutStore } from "@/store/layout";
+import { DetailDockPortal } from "@/components/shell/DetailDock";
 import { useTabsStore, type DrilldownCrumb } from "@/store/tabs";
 import { useFilterStore } from "@/store/filters";
 import { compileWhere } from "@/lib/filters";
@@ -63,10 +64,8 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
   const selectRow = useSelectionStore((s) => s.selectRow);
   const selectColumn = useSelectionStore((s) => s.selectColumn);
   const clearSelection = useSelectionStore((s) => s.clear);
-  const dockOpen = useDetailDockStore((s) => s.open);
-  const toggleDock = useDetailDockStore((s) => s.toggle);
-  const dockWidth = useDetailDockStore((s) => s.width);
-  const setDockWidth = useDetailDockStore((s) => s.setWidth);
+  const dockOpen = !useLayoutStore((s) => s.detailCollapsed);
+  const toggleDock = () => useLayoutStore.getState().toggle("detail");
   const openRelation = useTabsStore((s) => s.openRelation);
 
   // Virtual relation columns (outgoing parents + incoming children).
@@ -143,20 +142,6 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
   const onNext = () => setOffset((o) => o + PAGE_SIZE);
   const hasNext = page ? page.loaded === PAGE_SIZE : false;
   const pageNum = Math.floor(offset / PAGE_SIZE) + 1;
-
-  // Resize the detail dock by dragging its left edge.
-  const startResize = (e: React.MouseEvent) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startW = dockWidth;
-    const move = (ev: MouseEvent) => setDockWidth(startW - (ev.clientX - startX));
-    const up = () => {
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
-    };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
-  };
 
   const selectedRow =
     page && selection.rowIndex != null ? page.rows[selection.rowIndex] ?? null : null;
@@ -323,30 +308,24 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
         </div>
 
         {dockOpen && (
-          <>
-            <div
-              className="w-px shrink-0 cursor-col-resize bg-border hover:bg-accent"
-              onMouseDown={startResize}
+          <DetailDockPortal>
+            <DetailPanel
+              tabId={tabId}
+              connectionId={connectionId}
+              schema={schema}
+              table={table}
+              columns={page?.columns ?? []}
+              row={selectedRow}
+              rowIndex={selection.rowIndex}
+              columnName={selection.columnName}
+              mode={selection.mode}
+              description={description}
+              onClose={() => {
+                clearSelection(tabId);
+                toggleDock();
+              }}
             />
-            <div className="shrink-0" style={{ width: dockWidth }}>
-              <DetailPanel
-                tabId={tabId}
-                connectionId={connectionId}
-                schema={schema}
-                table={table}
-                columns={page?.columns ?? []}
-                row={selectedRow}
-                rowIndex={selection.rowIndex}
-                columnName={selection.columnName}
-                mode={selection.mode}
-                description={description}
-                onClose={() => {
-                  clearSelection(tabId);
-                  toggleDock();
-                }}
-              />
-            </div>
-          </>
+          </DetailDockPortal>
         )}
       </div>
     </div>

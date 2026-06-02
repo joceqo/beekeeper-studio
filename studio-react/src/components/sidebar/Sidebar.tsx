@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ChevronRight,
   ChevronDown,
@@ -8,12 +8,25 @@ import {
   Eye,
   Layers,
   PanelLeftClose,
+  Folder,
+  FolderOpen,
   Plus,
   Workflow,
 } from "lucide-react";
-import { backend, type Connection, type TableSummary } from "@/ipc";
+import {
+  backend,
+  type Connection,
+  type Schema,
+  type TableSummary,
+} from "@/ipc";
 import { useSidebarStore } from "@/store/sidebar";
+import { useLayoutStore } from "@/store/layout";
 import { useTabsStore } from "@/store/tabs";
+import {
+  buildExplorerTree,
+  formatRowEstimate,
+  type ExplorerNode,
+} from "@/lib/explorer";
 import { cn, IconButton, Tooltip, Badge, type BadgeProps } from "@/ui";
 
 const TAG_TONE: Record<NonNullable<Connection["tagColor"]>, BadgeProps["tone"]> = {
@@ -31,26 +44,28 @@ function TableIcon({ type }: { type: TableSummary["type"] }) {
 }
 
 export function Sidebar() {
-  const collapsed = useSidebarStore((s) => s.collapsed);
-  const toggle = useSidebarStore((s) => s.toggle);
+  const collapsed = useLayoutStore((s) => s.sidebarCollapsed);
+  const toggle = () => useLayoutStore.getState().toggle("sidebar");
+
   const activeConnectionId = useSidebarStore((s) => s.activeConnectionId);
   const setActiveConnection = useSidebarStore((s) => s.setActiveConnection);
   const expanded = useSidebarStore((s) => s.expandedConnections);
   const toggleConnection = useSidebarStore((s) => s.toggleConnection);
+  const explorerCollapsed = useSidebarStore((s) => s.explorerCollapsed);
+  const toggleGroup = useSidebarStore((s) => s.toggleGroup);
 
   const openTable = useTabsStore((s) => s.openTable);
   const openConnection = useTabsStore((s) => s.openConnection);
   const openGraph = useTabsStore((s) => s.openGraph);
 
   const [connections, setConnections] = useState<Connection[]>([]);
+  const [schemas, setSchemas] = useState<Schema[]>([]);
   const [tables, setTables] = useState<TableSummary[]>([]);
   const [search, setSearch] = useState("");
 
   useEffect(() => {
     backend.listConnections().then((conns) => {
       setConnections(conns);
-      // If the active connection isn't in the list (e.g. real MCP ids differ
-      // from the mock defaults), select the first one so tables can load.
       if (conns.length && !conns.some((c) => c.id === activeConnectionId)) {
         setActiveConnection(conns[0].id);
         toggleConnection(conns[0].id);
@@ -63,25 +78,47 @@ export function Sidebar() {
     if (!activeConnectionId) return;
     let cancelled = false;
     // BUG FIX: await connect so the saved connection id resolves to the live
-    // connectionId before listTables fires — otherwise the first call can go
-    // out with an unresolved id and fail.
+    // connectionId before listTables/listSchemas fire.
     backend
       .connect(activeConnectionId)
-      .then((liveId) => backend.listTables(liveId))
-      .then((t) => {
-        if (!cancelled) setTables(t);
+      .then(async (liveId) => {
+        const [t, s] = await Promise.all([
+          backend.listTables(liveId),
+          backend.listSchemas(liveId).catch(() => [] as Schema[]),
+        ]);
+        if (!cancelled) {
+          setTables(t);
+          setSchemas(s);
+        }
       })
       .catch(() => {
-        if (!cancelled) setTables([]);
+        if (!cancelled) {
+          setTables([]);
+          setSchemas([]);
+        }
       });
     return () => {
       cancelled = true;
     };
   }, [activeConnectionId]);
 
+  // Group connections into folders (folder-less connections render top-level).
+  const connectionGroups = useMemo(() => groupConnections(connections), [connections]);
+
+  // Build the explorer tree (schema folders + prefix groups, public-first).
+  const schemaCounts = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const s of schemas) m[s.name] = s.tableCount;
+    return m;
+  }, [schemas]);
+  const tree = useMemo(
+    () => buildExplorerTree(tables, schemaCounts, search),
+    [tables, schemaCounts, search]
+  );
+
   if (collapsed) {
     return (
-      <div className="flex w-11 shrink-0 flex-col items-center gap-1 border-r border-border bg-bg-secondary py-2">
+      <div className="flex h-full w-full flex-col items-center gap-1 overflow-hidden border-r border-border bg-bg-secondary py-2">
         <Tooltip content="Expand sidebar" side="right">
           <IconButton size="lg" aria-label="Expand sidebar" onClick={toggle}>
             <ChevronRight size={16} />
@@ -106,15 +143,61 @@ export function Sidebar() {
     );
   }
 
-  const filtered = tables.filter((t) =>
-    `${t.schema}.${t.name}`.toLowerCase().includes(search.toLowerCase())
-  );
+  const renderConnection = (c: Connection) => {
+    const isActive = c.id === activeConnectionId;
+    const isOpen = expanded[c.id];
+    return (
+      <button
+        key={c.id}
+        className={cn(
+          "flex w-full items-center gap-1 rounded-sm px-1.5 py-1 text-left font-mono text-md hover:bg-bg-hover",
+          isActive && "bg-bg-active"
+        )}
+        onClick={() => {
+          setActiveConnection(c.id);
+          toggleConnection(c.id);
+        }}
+      >
+        {isOpen ? (
+          <ChevronDown size={13} className="shrink-0 text-text-muted" />
+        ) : (
+          <ChevronRight size={13} className="shrink-0 text-text-muted" />
+        )}
+        {/* paint dot (colored) — falls back to the engine icon tint */}
+        {c.paint ? (
+          <span
+            className="h-2 w-2 shrink-0 rounded-full"
+            style={{ backgroundColor: c.paint }}
+            aria-hidden
+          />
+        ) : (
+          <Database
+            size={13}
+            className={cn("shrink-0", isActive ? "text-accent" : "text-text-muted")}
+          />
+        )}
+        <span className="truncate">{c.name}</span>
+        {c.tag && (
+          <Badge tone={TAG_TONE[c.tagColor ?? "neutral"]} className="ml-auto font-mono">
+            {c.tag}
+          </Badge>
+        )}
+        <span
+          className={cn(
+            "h-1.5 w-1.5 shrink-0 rounded-full",
+            c.connected ? "bg-success" : "bg-bg-tertiary",
+            c.tag ? "ml-1.5" : "ml-auto"
+          )}
+        />
+      </button>
+    );
+  };
 
   return (
-    <div className="flex h-full flex-col border-r border-border bg-bg-secondary">
+    <div className="flex h-full flex-col overflow-hidden border-r border-border bg-bg-secondary font-mono">
       {/* CONNECTIONS */}
       <div className="flex items-center justify-between px-3 pt-3 pb-1">
-        <span className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+        <span className="font-sans text-xs font-semibold uppercase tracking-wide text-text-muted">
           Connections
         </span>
         <div className="flex items-center gap-1">
@@ -131,53 +214,39 @@ export function Sidebar() {
         </div>
       </div>
       <div className="px-1.5">
-        {connections.map((c) => {
-          const isActive = c.id === activeConnectionId;
-          const isOpen = expanded[c.id];
+        {connectionGroups.loose.map(renderConnection)}
+        {connectionGroups.folders.map(({ folder, items }) => {
+          const id = `conn-folder:${folder}`;
+          const open = !explorerCollapsed[id];
           return (
-            <div key={c.id}>
+            <div key={folder}>
               <button
-                className={cn(
-                  "flex w-full items-center gap-1 rounded-sm px-1.5 py-1 text-left text-md hover:bg-bg-hover",
-                  isActive && "bg-bg-active"
-                )}
-                onClick={() => {
-                  setActiveConnection(c.id);
-                  toggleConnection(c.id);
-                }}
+                className="flex w-full items-center gap-1 rounded-sm px-1.5 py-1 text-left text-md text-text-secondary hover:bg-bg-hover"
+                onClick={() => toggleGroup(id)}
               >
-                {isOpen ? (
+                {open ? (
                   <ChevronDown size={13} className="text-text-muted" />
                 ) : (
                   <ChevronRight size={13} className="text-text-muted" />
                 )}
-                <Database
-                  size={13}
-                  className={cn(isActive ? "text-accent" : "text-text-muted")}
-                />
-                <span className="truncate">{c.name}</span>
-                {c.tag && (
-                  <Badge tone={TAG_TONE[c.tagColor ?? "neutral"]} className="ml-auto">
-                    {c.tag}
-                  </Badge>
+                {open ? (
+                  <FolderOpen size={13} className="text-text-muted" />
+                ) : (
+                  <Folder size={13} className="text-text-muted" />
                 )}
-                <span
-                  className={cn(
-                    "ml-auto h-1.5 w-1.5 shrink-0 rounded-full",
-                    c.connected ? "bg-success" : "bg-bg-tertiary",
-                    c.tag && "ml-1.5"
-                  )}
-                />
+                <span className="truncate">{folder}</span>
+                <span className="ml-auto text-xs text-text-muted">{items.length}</span>
               </button>
+              {open && <div className="pl-3">{items.map(renderConnection)}</div>}
             </div>
           );
         })}
       </div>
 
-      {/* TABLES */}
+      {/* EXPLORER */}
       <div className="mt-3 flex items-center justify-between px-3 pb-1">
-        <span className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-          Tables
+        <span className="font-sans text-xs font-semibold uppercase tracking-wide text-text-muted">
+          Explorer
         </span>
         <Tooltip content="Open schema graph">
           <IconButton
@@ -197,28 +266,142 @@ export function Sidebar() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search tables…"
-            className="w-full bg-transparent text-sm text-text-primary outline-none placeholder:text-text-muted"
+            className="w-full bg-transparent font-mono text-sm text-text-primary outline-none placeholder:text-text-muted"
           />
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-auto px-1.5 pb-2">
-        {filtered.map((t) => (
-          <button
-            key={`${t.schema}.${t.name}`}
-            className="flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-md hover:bg-bg-hover"
-            onClick={() => activeConnectionId && openTable(activeConnectionId, t.schema, t.name)}
-          >
-            <TableIcon type={t.type} />
-            <span className="truncate text-text-secondary">{t.name}</span>
-            {t.schema !== "public" && (
-              <span className="ml-auto text-xs text-text-muted">{t.schema}</span>
-            )}
-          </button>
-        ))}
-        {filtered.length === 0 && (
-          <div className="px-2 py-3 text-xs text-text-muted">No tables match.</div>
+        {tree.map((sch) => {
+          const open = !explorerCollapsed[sch.id];
+          return (
+            <div key={sch.id}>
+              <button
+                className="flex w-full items-center gap-1 rounded-sm px-1.5 py-1 text-left text-md text-text-secondary hover:bg-bg-hover"
+                onClick={() => toggleGroup(sch.id)}
+              >
+                {open ? (
+                  <ChevronDown size={13} className="text-text-muted" />
+                ) : (
+                  <ChevronRight size={13} className="text-text-muted" />
+                )}
+                {open ? (
+                  <FolderOpen size={13} className="text-text-muted" />
+                ) : (
+                  <Folder size={13} className="text-text-muted" />
+                )}
+                <span className="truncate">{sch.schema}</span>
+                <span className="ml-auto text-xs text-text-muted">{sch.tableCount}</span>
+              </button>
+              {open && (
+                <div className="pl-3">
+                  {sch.nodes.map((node) => (
+                    <ExplorerNodeRow
+                      key={node.kind === "group" ? node.id : `${node.table.schema}.${node.table.name}`}
+                      node={node}
+                      collapsedMap={explorerCollapsed}
+                      onToggleGroup={toggleGroup}
+                      onOpenTable={(t) =>
+                        activeConnectionId && openTable(activeConnectionId, t.schema, t.name)
+                      }
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {tree.length === 0 && (
+          <div className="px-2 py-3 font-sans text-xs text-text-muted">No tables match.</div>
         )}
       </div>
     </div>
   );
+}
+
+/** A single explorer node: either a prefix sub-folder or a table leaf. */
+function ExplorerNodeRow({
+  node,
+  collapsedMap,
+  onToggleGroup,
+  onOpenTable,
+}: {
+  node: ExplorerNode;
+  collapsedMap: Record<string, boolean>;
+  onToggleGroup: (id: string) => void;
+  onOpenTable: (t: TableSummary) => void;
+}) {
+  if (node.kind === "table") {
+    const t = node.table;
+    const rows = formatRowEstimate(t.rowEstimate);
+    return (
+      <button
+        className="flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-md hover:bg-bg-hover"
+        onClick={() => onOpenTable(t)}
+      >
+        <TableIcon type={t.type} />
+        <span className="truncate text-text-secondary">{t.name}</span>
+        {rows && <span className="ml-auto text-xs text-text-muted">{rows}</span>}
+      </button>
+    );
+  }
+
+  const open = !collapsedMap[node.id];
+  return (
+    <div>
+      <button
+        className="flex w-full items-center gap-1 rounded-sm px-1.5 py-1 text-left text-md text-text-secondary hover:bg-bg-hover"
+        onClick={() => onToggleGroup(node.id)}
+      >
+        {open ? (
+          <ChevronDown size={12} className="text-text-muted" />
+        ) : (
+          <ChevronRight size={12} className="text-text-muted" />
+        )}
+        {open ? (
+          <FolderOpen size={12} className="text-text-muted" />
+        ) : (
+          <Folder size={12} className="text-text-muted" />
+        )}
+        <span className="truncate">{node.label}</span>
+        <span className="ml-auto text-xs text-text-muted">{node.children.length}</span>
+      </button>
+      {open && (
+        <div className="pl-3">
+          {node.children.map((child) => {
+            const rows = formatRowEstimate(child.table.rowEstimate);
+            return (
+              <button
+                key={`${child.table.schema}.${child.table.name}`}
+                className="flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-md hover:bg-bg-hover"
+                onClick={() => onOpenTable(child.table)}
+              >
+                <TableIcon type={child.table.type} />
+                <span className="truncate text-text-secondary">{child.table.name}</span>
+                {rows && <span className="ml-auto text-xs text-text-muted">{rows}</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Split connections into folder groups + loose (folder-less) connections. */
+function groupConnections(connections: Connection[]) {
+  const loose: Connection[] = [];
+  const folderMap = new Map<string, Connection[]>();
+  for (const c of connections) {
+    if (c.folder) {
+      const arr = folderMap.get(c.folder) ?? [];
+      arr.push(c);
+      folderMap.set(c.folder, arr);
+    } else {
+      loose.push(c);
+    }
+  }
+  return {
+    loose,
+    folders: [...folderMap.entries()].map(([folder, items]) => ({ folder, items })),
+  };
 }

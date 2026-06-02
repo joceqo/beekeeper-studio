@@ -1,65 +1,141 @@
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
+import {
+  Panel,
+  PanelGroup,
+  PanelResizeHandle,
+  type ImperativePanelHandle,
+} from "react-resizable-panels";
 import { TitleBar } from "@/components/shell/TitleBar";
 import { MainContent } from "@/components/shell/MainContent";
 import { StatusBar } from "@/components/shell/StatusBar";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { ActivityPanel } from "@/components/activity/ActivityPanel";
-import { useSidebarStore } from "@/store/sidebar";
+import { DetailHostProvider, useDetailHost } from "@/components/shell/DetailDock";
+import { useLayoutStore } from "@/store/layout";
 import { useTabsStore } from "@/store/tabs";
 import { TooltipProvider, Toaster } from "@/ui";
 
+/** Thin resize handle styled with the design tokens: subtle line, accent on hover/drag. */
+function HResize() {
+  return (
+    <PanelResizeHandle className="group relative w-px shrink-0 bg-border outline-none data-[resize-handle-state=drag]:bg-accent">
+      <span className="absolute inset-y-0 -left-1 -right-1 group-hover:bg-accent/40 group-data-[resize-handle-state=drag]:bg-accent/40" />
+    </PanelResizeHandle>
+  );
+}
+
+function VResize() {
+  return (
+    <PanelResizeHandle className="group relative h-px shrink-0 bg-border outline-none data-[resize-handle-state=drag]:bg-accent">
+      <span className="absolute inset-x-0 -top-1 -bottom-1 group-hover:bg-accent/40 group-data-[resize-handle-state=drag]:bg-accent/40" />
+    </PanelResizeHandle>
+  );
+}
+
 export default function App() {
-  const collapsed = useSidebarStore((s) => s.collapsed);
-  const width = useSidebarStore((s) => s.width);
-  const setWidth = useSidebarStore((s) => s.setWidth);
   const bootstrap = useTabsStore((s) => s.bootstrap);
 
-  // Resolve the real connection list on startup and open the first table.
-  // No connection id is hardcoded, so a fresh load works in mock AND MCP.
+  const sidebarCollapsed = useLayoutStore((s) => s.sidebarCollapsed);
+  const detailCollapsed = useLayoutStore((s) => s.detailCollapsed);
+  const activityCollapsed = useLayoutStore((s) => s.activityCollapsed);
+  const registerPanel = useLayoutStore((s) => s.registerPanel);
+  const setCollapsed = useLayoutStore((s) => s.setCollapsed);
+
+  // The detail dock Panel content element; views portal their DetailPanel here.
+  const [detailHost, setDetailHost] = useDetailHost();
+
   useEffect(() => {
     void bootstrap();
   }, [bootstrap]);
 
-  const startResize = (e: React.MouseEvent) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startW = width;
-    const move = (ev: MouseEvent) => setWidth(startW + (ev.clientX - startX));
-    const up = () => {
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
-    };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
-  };
+  const sidebarRef = useCallback(
+    (r: ImperativePanelHandle | null) => registerPanel("sidebar", r),
+    [registerPanel]
+  );
+  const detailRef = useCallback(
+    (r: ImperativePanelHandle | null) => registerPanel("detail", r),
+    [registerPanel]
+  );
+  const activityRef = useCallback(
+    (r: ImperativePanelHandle | null) => registerPanel("activity", r),
+    [registerPanel]
+  );
 
   return (
     <TooltipProvider delay={300}>
-      <div className="flex h-screen w-screen flex-col overflow-hidden bg-bg-primary text-text-primary">
-        <TitleBar />
+      <DetailHostProvider host={detailHost}>
+        <div className="flex h-screen w-screen flex-col overflow-hidden bg-bg-primary text-text-primary">
+          <TitleBar />
 
-        {/* sidebar + main */}
-        <div className="flex min-h-0 flex-1">
-          <div
-            className="shrink-0"
-            style={{ width: collapsed ? undefined : width }}
+          {/* horizontal: sidebar | main | detail dock */}
+          <PanelGroup
+            direction="horizontal"
+            autoSaveId="studio-react.layout.horizontal"
+            className="min-h-0 flex-1"
           >
-            <Sidebar />
-          </div>
-          {!collapsed && (
-            <div
-              className="w-px shrink-0 cursor-col-resize bg-border hover:bg-accent"
-              onMouseDown={startResize}
-            />
-          )}
-          <div className="min-w-0 flex-1 bg-bg-primary">
-            <MainContent />
-          </div>
-        </div>
+            <Panel
+              id="sidebar"
+              order={1}
+              ref={sidebarRef}
+              collapsible
+              collapsedSize={3}
+              defaultSize={sidebarCollapsed ? 3 : 18}
+              minSize={12}
+              maxSize={32}
+              onCollapse={() => setCollapsed("sidebar", true)}
+              onExpand={() => setCollapsed("sidebar", false)}
+            >
+              <Sidebar />
+            </Panel>
 
-        <ActivityPanel />
-        <StatusBar />
-      </div>
+            <HResize />
+
+            <Panel id="main" order={2} minSize={30}>
+              {/* vertical: grid/editor | activity log */}
+              <PanelGroup direction="vertical" autoSaveId="studio-react.layout.vertical">
+                <Panel id="content" order={1} minSize={20}>
+                  <MainContent />
+                </Panel>
+
+                <VResize />
+
+                <Panel
+                  id="activity"
+                  order={2}
+                  ref={activityRef}
+                  collapsible
+                  collapsedSize={4}
+                  defaultSize={activityCollapsed ? 4 : 28}
+                  minSize={12}
+                  onCollapse={() => setCollapsed("activity", true)}
+                  onExpand={() => setCollapsed("activity", false)}
+                >
+                  <ActivityPanel />
+                </Panel>
+              </PanelGroup>
+            </Panel>
+
+            <HResize />
+
+            <Panel
+              id="detail"
+              order={3}
+              ref={detailRef}
+              collapsible
+              collapsedSize={0}
+              defaultSize={detailCollapsed ? 0 : 22}
+              minSize={14}
+              maxSize={40}
+              onCollapse={() => setCollapsed("detail", true)}
+              onExpand={() => setCollapsed("detail", false)}
+            >
+              <div ref={setDetailHost} className="h-full" />
+            </Panel>
+          </PanelGroup>
+
+          <StatusBar />
+        </div>
+      </DetailHostProvider>
       <Toaster />
     </TooltipProvider>
   );

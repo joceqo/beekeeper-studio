@@ -15,6 +15,14 @@ export interface Connection {
   /** Human label such as "PRD" rendered as a colored tag. */
   tag?: string;
   tagColor?: "danger" | "warning" | "success" | "info" | "neutral";
+  /**
+   * Optional folder this connection is grouped under in the sidebar (e.g.
+   * "Production", "Demo"). Connections without a folder render at the top level.
+   * Real MCP connections have no folders — that's fine.
+   */
+  folder?: string;
+  /** Optional connection "paint" — a CSS color for the leading dot (SlashTable). */
+  paint?: string;
   connected: boolean;
 }
 

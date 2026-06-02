@@ -306,20 +306,22 @@ export class McpBackendClient implements BackendClient {
   async listTables(connectionId: string, schema?: string): Promise<TableSummary[]> {
     const live = await this.resolveConnection(connectionId);
     const res = await this.callTool<{
-      tables: { name: string; schema: string }[];
-      views: { name: string; schema: string }[];
+      tables: { name: string; schema: string; estimatedRows?: number | null }[];
+      views: { name: string; schema: string; estimatedRows?: number | null }[];
     }>("list_tables", schema ? { connectionId: live, schema } : { connectionId: live });
     const tables: TableSummary[] = res.tables.map((t) => ({
       schema: t.schema,
       name: t.name,
       type: "table",
-      rowEstimate: 0,
+      // estimatedRows comes from the backend's pg_class.reltuples estimate
+      // (Postgres); null/missing on other dialects -> 0 (no count shown).
+      rowEstimate: t.estimatedRows ?? 0,
     }));
     const views: TableSummary[] = res.views.map((v) => ({
       schema: v.schema,
       name: v.name,
       type: "view",
-      rowEstimate: 0,
+      rowEstimate: v.estimatedRows ?? 0,
     }));
     return [...tables, ...views];
   }

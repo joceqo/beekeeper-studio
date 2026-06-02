@@ -12,15 +12,32 @@ export const MOCK_CONNECTIONS: Connection[] = [
     name: "mlc local",
     kind: "postgres",
     host: "127.0.0.1:5432",
+    folder: "Demo",
+    tag: "DEV",
+    tagColor: "info",
+    paint: "#5a9ebf",
     connected: true,
+  },
+  {
+    id: "ecommerce-stg",
+    name: "ecommerce",
+    kind: "postgres",
+    host: "stg.shop.internal:5432",
+    folder: "Demo",
+    tag: "TST",
+    tagColor: "warning",
+    paint: "#d98a35",
+    connected: false,
   },
   {
     id: "mlc-remote",
     name: "mlc remote",
     kind: "postgres",
     host: "db.mlc.nexenture.fr:5432",
+    folder: "Production",
     tag: "PRD",
     tagColor: "danger",
+    paint: "#d94040",
     connected: false,
   },
   {
@@ -33,17 +50,24 @@ export const MOCK_CONNECTIONS: Connection[] = [
 ];
 
 export const MOCK_SCHEMAS: Schema[] = [
-  { name: "public", tableCount: 6 },
+  { name: "public", tableCount: 11 },
   { name: "analytics", tableCount: 3 },
   { name: "auth", tableCount: 2 },
 ];
 
 export const MOCK_TABLES: TableSummary[] = [
+  // public: prefix-groupable names + a join table (achievement_users) so the
+  // explorer can demo prefix sub-folders + join-tables-last ordering.
   { schema: "public", name: "users", type: "table", rowEstimate: 299 },
+  { schema: "public", name: "achievements", type: "table", rowEstimate: 76 },
+  { schema: "public", name: "achievement_categories", type: "table", rowEstimate: 12 },
+  { schema: "public", name: "achievement_users", type: "table", rowEstimate: 57700 },
   { schema: "public", name: "campaigns", type: "table", rowEstimate: 1820 },
+  { schema: "public", name: "campaign_steps", type: "table", rowEstimate: 9241 },
   { schema: "public", name: "reports", type: "table", rowEstimate: 4502 },
-  { schema: "public", name: "graph", type: "table", rowEstimate: 64 },
+  { schema: "public", name: "attachments", type: "table", rowEstimate: 57700 },
   { schema: "public", name: "events", type: "table", rowEstimate: 99213 },
+  { schema: "public", name: "graph", type: "table", rowEstimate: 64 },
   { schema: "public", name: "active_users", type: "view", rowEstimate: 0 },
   { schema: "analytics", name: "daily_rollup", type: "materialized-view", rowEstimate: 365 },
   { schema: "analytics", name: "sessions", type: "table", rowEstimate: 50231 },
