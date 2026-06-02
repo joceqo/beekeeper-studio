@@ -127,6 +127,36 @@ export type PageRelationCounts = Record<string, Record<string, number>>;
 
 export type CellValue = string | number | boolean | null;
 
+/** A single (value, count) pair from a column's value distribution. */
+export interface TopValue {
+  value: CellValue;
+  count: number;
+}
+
+/**
+ * Per-column value statistics, used by {@link inferSemanticType} to classify a
+ * column by sampling its most common values, and (optionally) by formatting
+ * heuristics. Sourced from the MCP `get_table_stats` tool.
+ */
+export interface ColumnStats {
+  name: string;
+  /** Top ~10 most common non-null values, descending by count. */
+  top_values: TopValue[];
+  /** Fraction of rows that are NULL in this column (0..1), when known. */
+  nullFraction?: number;
+}
+
+export interface TableStats {
+  /** Per-column stats, keyed for lookup in the grid/detail panel. */
+  columns: ColumnStats[];
+}
+
+export interface GetTableStatsParams {
+  connectionId: string;
+  table: string;
+  schema?: string;
+}
+
 export interface RecordPage {
   columns: ColumnDef[];
   rows: CellValue[][];
@@ -237,4 +267,11 @@ export interface BackendClient {
    * error so the grid degrades to count-less chips.
    */
   getPageRelationCounts(params: PageRelationCountsParams): Promise<PageRelationCounts>;
+  /**
+   * Per-column value statistics (top values + null fraction) used to infer
+   * semantic cell types. Best-effort: implementations should resolve to a
+   * `{ columns: [] }` shape (not reject) when the underlying tool is
+   * unavailable so the grid degrades to dataType-based inference.
+   */
+  getTableStats(params: GetTableStatsParams): Promise<TableStats>;
 }

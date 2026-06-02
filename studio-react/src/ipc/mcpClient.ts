@@ -5,6 +5,7 @@ import type {
   Connection,
   GetRecordsParams,
   GetRelationCountsParams,
+  GetTableStatsParams,
   PageRelationCounts,
   PageRelationCountsParams,
   QueryResult,
@@ -13,7 +14,9 @@ import type {
   Schema,
   SchemaGraph,
   TableDescription,
+  TableStats,
   TableSummary,
+  TopValue,
 } from "./types";
 
 /**
@@ -472,6 +475,34 @@ export class McpBackendClient implements BackendClient {
       return out;
     } catch {
       return out;
+    }
+  }
+
+  async getTableStats(params: GetTableStatsParams): Promise<TableStats> {
+    // Best-effort: the get_table_stats tool may be absent on older backends.
+    // Degrade to no stats so the grid falls back to dataType-based inference.
+    try {
+      const live = await this.resolveConnection(params.connectionId);
+      const raw = await this.callTool<{
+        columns?: {
+          name: string;
+          top_values?: { value: CellValue; count: number }[];
+          nullFraction?: number;
+        }[];
+      }>("get_table_stats", {
+        connectionId: live,
+        table: params.table,
+        ...(params.schema ? { schema: params.schema } : {}),
+      });
+      return {
+        columns: (raw?.columns ?? []).map((c) => ({
+          name: c.name,
+          top_values: (c.top_values ?? []) as TopValue[],
+          ...(typeof c.nullFraction === "number" ? { nullFraction: c.nullFraction } : {}),
+        })),
+      };
+    } catch {
+      return { columns: [] };
     }
   }
 

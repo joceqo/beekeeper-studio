@@ -4,6 +4,7 @@ import DataEditor, {
   GridCellKind,
   GridColumn,
   GridSelection,
+  GridMouseEventArgs,
   Item,
   Rectangle,
   Theme,
@@ -18,17 +19,25 @@ import {
   EyeOff,
   SlidersHorizontal,
 } from "lucide-react";
-import type { CellValue, ColumnDef, TableDescription } from "@/ipc";
+import type { CellValue, ColumnDef, ColumnStats, TableDescription } from "@/ipc";
 import {
   parseRef,
-  semanticType,
   type RelationColumn,
   type SemanticType,
 } from "@/lib/relations";
+import { resolveSemanticType } from "@/lib/semantic";
 import { useThemeStore } from "@/store/theme";
 import { useColumnConfigStore, formatCellValue } from "@/store/columnConfig";
 import { HEADER_ICONS, headerIconKey } from "./headerIcons";
 import { AnchoredMenu, type MenuEntry } from "@/ui";
+import {
+  SEMANTIC_RENDERERS,
+  formatSemanticValue,
+  linkHrefFor,
+  type ColorCell,
+  type RatingCell,
+} from "./semanticCells";
+import { ImagePreviewCard } from "./ImagePreviewCard";
 
 /** Read a CSS custom property off the document root. */
 function token(name: string): string {
@@ -139,6 +148,8 @@ export interface DataGridProps {
   onFilterColumn?: (column: ColumnDef) => void;
   onHideColumn?: (column: ColumnDef) => void;
   onConfigureColumn?: (column: ColumnDef) => void;
+  /** Per-column value stats (top_values + nullFraction) for semantic inference. */
+  stats?: Map<string, ColumnStats>;
 }
 
 /** Write text to the clipboard, with a synchronous fallback. */
@@ -183,6 +194,7 @@ export function DataGrid({
   onFilterColumn,
   onHideColumn,
   onConfigureColumn,
+  stats,
 }: DataGridProps) {
   // re-derive theme when app theme flips
   const theme = useThemeStore((s) => s.theme);
@@ -195,6 +207,13 @@ export function DataGrid({
   } | null>(null);
   const hasHeaderMenu =
     !!onSortColumn || !!onFilterColumn || !!onHideColumn || !!onConfigureColumn;
+
+  // Hovered image cell, driving the full-size preview card (image_url).
+  const [imagePreview, setImagePreview] = useState<{
+    url: string;
+    x: number;
+    y: number;
+  } | null>(null);
 
   // Per-column display config (format + visibility) for this tab.
   const configByKey = useColumnConfigStore((s) => s.byKey);
@@ -223,9 +242,17 @@ export function DataGrid({
     [columns, columnConfig]
   );
 
+  // Resolve a column's effective semantic type: explicit TypePicker override,
+  // else PK/FK/relation role, else value/name inference (from stats), else the
+  // dataType fallback. Shared by the header icon and the cell renderer.
   const semanticOf = useCallback(
-    (c: ColumnDef): SemanticType => semanticType(c, fkByColumn.has(c.name)),
-    [fkByColumn]
+    (c: ColumnDef): SemanticType =>
+      resolveSemanticType(c, {
+        isFk: fkByColumn.has(c.name),
+        stats: stats?.get(c.name),
+        override: columnConfig(c.name).semanticType,
+      }),
+    [fkByColumn, stats, columnConfig]
   );
 
   const gridColumns = useMemo<GridColumn[]>(() => {
@@ -313,6 +340,102 @@ export function DataGrid({
           themeOverride: { textDark: token("--color-accent") },
         };
       }
+
+      // Semantic-type rendering (color swatch, stars, links, image thumb, json
+      // mono, Intl number/currency/%/relative-time). Falls through to the
+      // dataType-based defaults below when the type has no special renderer.
+      const sem: SemanticType | null = def ? semanticOf(def) : null;
+      const text = String(raw);
+
+      switch (sem) {
+        case "color":
+          return {
+            kind: GridCellKind.Custom,
+            allowOverlay: true,
+            copyData: text,
+            data: { kind: "semantic-color", color: text } as ColorCell["data"],
+          } as ColorCell;
+        case "rating": {
+          const n = Number(raw);
+          return {
+            kind: GridCellKind.Custom,
+            allowOverlay: true,
+            copyData: text,
+            data: {
+              kind: "semantic-rating",
+              rating: Number.isFinite(n) ? n : 0,
+              max: 5,
+            } as RatingCell["data"],
+          } as RatingCell;
+        }
+        case "image_url":
+          // Glide's built-in image cell renders a thumbnail; the hover preview
+          // card is driven by onItemHovered.
+          return {
+            kind: GridCellKind.Image,
+            data: [text],
+            displayData: [text],
+            allowOverlay: true,
+            readonly: true,
+          };
+        case "email":
+        case "phone":
+        case "url":
+          // Clickable link (mailto/tel/href); navigation in onCellClicked.
+          return {
+            kind: GridCellKind.Text,
+            data: text,
+            displayData: text,
+            allowOverlay: true,
+            cursor: "pointer",
+            themeOverride: { textDark: token("--color-accent") },
+          };
+        case "code":
+        case "json": {
+          const display = sem === "json" ? formatSemanticValue("json", text) ?? text : text;
+          return {
+            kind: GridCellKind.Text,
+            data: text,
+            displayData: display,
+            allowOverlay: true,
+            themeOverride: {
+              baseFontStyle: "12px",
+              fontFamily:
+                '"JetBrains Mono Variable", ui-monospace, SFMono-Regular, monospace',
+            },
+          };
+        }
+        case "cidr":
+          return {
+            kind: GridCellKind.Text,
+            data: text,
+            displayData: text,
+            allowOverlay: true,
+            themeOverride: {
+              fontFamily:
+                '"JetBrains Mono Variable", ui-monospace, SFMono-Regular, monospace',
+            },
+          };
+        case "number":
+        case "currency":
+        case "percentage":
+        case "date_relative": {
+          const display = formatSemanticValue(sem, raw as string | number);
+          if (display != null) {
+            return {
+              kind: GridCellKind.Text,
+              data: text,
+              displayData: display,
+              allowOverlay: true,
+              contentAlign: sem === "date_relative" ? "left" : "right",
+            };
+          }
+          break;
+        }
+        default:
+          break;
+      }
+
       if (typeof raw === "boolean" || (def && isBool(def))) {
         return {
           kind: GridCellKind.Boolean,
@@ -332,7 +455,6 @@ export function DataGrid({
           contentAlign: "right",
         };
       }
-      const text = String(raw);
       return {
         kind: GridCellKind.Text,
         data: text,
@@ -340,7 +462,7 @@ export function DataGrid({
         allowOverlay: true,
       };
     },
-    [visible, rows, columnConfig, relations, relationCounts, fkByColumn]
+    [visible, rows, columnConfig, relations, relationCounts, fkByColumn, semanticOf]
   );
 
   const onHeaderClicked = useCallback(
@@ -440,9 +562,39 @@ export function DataGrid({
       if (def && fkByColumn.has(def.name)) {
         const value = rows[row]?.[mapped.originalIndex];
         if (value !== null && value !== undefined) onFkClick?.(row, def, value);
+        return;
+      }
+      // Link cells (email/phone/url) → open the corresponding URI.
+      if (def) {
+        const value = rows[row]?.[mapped.originalIndex];
+        if (value !== null && value !== undefined) {
+          const href = linkHrefFor(semanticOf(def), String(value));
+          if (href) window.open(href, "_blank", "noopener,noreferrer");
+        }
       }
     },
-    [visible, relations, onRelationClick, fkByColumn, rows, onFkClick]
+    [visible, relations, onRelationClick, fkByColumn, rows, onFkClick, semanticOf]
+  );
+
+  // Hover preview for image_url cells: show a full-size card near the pointer.
+  const onItemHovered = useCallback(
+    (args: GridMouseEventArgs) => {
+      if (args.kind !== "cell") {
+        setImagePreview(null);
+        return;
+      }
+      const [col, row] = args.location;
+      const mapped = col < visible.length ? visible[col] : undefined;
+      const def = mapped?.c;
+      const raw = mapped ? rows[row]?.[mapped.originalIndex] : undefined;
+      if (def && raw != null && semanticOf(def) === "image_url") {
+        const [px, py] = args.bounds ? [args.bounds.x, args.bounds.y] : [0, 0];
+        setImagePreview({ url: String(raw), x: px, y: py });
+      } else {
+        setImagePreview(null);
+      }
+    },
+    [visible, rows, semanticOf]
   );
 
   const onGridSelectionChange = useCallback(
@@ -464,6 +616,7 @@ export function DataGrid({
       <DataEditor
         theme={glide}
         headerIcons={HEADER_ICONS}
+        customRenderers={SEMANTIC_RENDERERS}
         getCellContent={getCellContent}
         columns={gridColumns}
         rows={rows.length}
@@ -476,6 +629,7 @@ export function DataGrid({
         onHeaderClicked={onHeaderClicked}
         onHeaderMenuClick={hasHeaderMenu ? onHeaderMenuClick : undefined}
         onCellClicked={onCellClicked}
+        onItemHovered={onItemHovered}
         onGridSelectionChange={onGridSelectionChange}
         keybindings={{ search: true }}
       />
@@ -488,6 +642,9 @@ export function DataGrid({
           anchorRect={headerMenu?.rect ?? null}
           items={headerMenuItems}
         />
+      )}
+      {imagePreview && (
+        <ImagePreviewCard url={imagePreview.url} x={imagePreview.x} y={imagePreview.y} />
       )}
     </div>
   );

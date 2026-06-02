@@ -2,8 +2,10 @@ import type {
   BackendClient,
   CellValue,
   ColumnDef,
+  ColumnStats,
   GetRecordsParams,
   GetRelationCountsParams,
+  GetTableStatsParams,
   IncomingForeignKey,
   PageRelationCounts,
   PageRelationCountsParams,
@@ -12,6 +14,8 @@ import type {
   RelationCount,
   SchemaGraph,
   TableDescription,
+  TableStats,
+  TopValue,
 } from "./types";
 import {
   MOCK_CONNECTIONS,
@@ -206,6 +210,59 @@ function likeMatch(value: string, pattern: string): boolean {
   return new RegExp(`^${regex}$`, "i").test(value);
 }
 
+/** Build a descending (value, count) list from a set of sample values. */
+function topValues(values: CellValue[]): TopValue[] {
+  return values.map((value, i) => ({ value, count: 200 - i * 17 }));
+}
+
+/**
+ * Fake but type-appropriate `top_values` per column, so {@link inferSemanticType}
+ * has realistic samples to classify offline. Names mirror the mock columns
+ * (`email`, `*_url`, color/phone/etc. demonstrated on generic columns).
+ */
+function mockColumnStats(table: string, c: ColumnDef): ColumnStats {
+  const n = c.name.toLowerCase();
+  if (n === "email") {
+    return {
+      name: c.name,
+      top_values: topValues([
+        "alex.lee1@example.com",
+        "jordan.kim2@example.com",
+        "sam.patel3@example.com",
+      ]),
+      nullFraction: 0,
+    };
+  }
+  if (n.endsWith("_url") || n === "avatar" || n === "image") {
+    return {
+      name: c.name,
+      top_values: topValues([
+        "https://cdn.example.com/a.png",
+        "https://cdn.example.com/b.jpg",
+        "https://cdn.example.com/c.webp",
+      ]),
+      nullFraction: 0.1,
+    };
+  }
+  if (n === "color" || n.endsWith("_color")) {
+    return {
+      name: c.name,
+      top_values: topValues(["#ff5722", "#2196f3", "#4caf50", "#9c27b0"]),
+    };
+  }
+  if (n === "status") {
+    return { name: c.name, top_values: topValues(["pending", "active", "archived", "failed"]) };
+  }
+  if (n === "rating" || n === "stars") {
+    return { name: c.name, top_values: topValues([5, 4, 3, 2, 1]) };
+  }
+  // Generic: a couple of representative values for the column.
+  return {
+    name: c.name,
+    top_values: topValues([`${table}-0001`, `${table}-0002`, `${table}-0003`]),
+  };
+}
+
 /**
  * Mock relationship topology (mirrors the schema-graph edges below):
  *   campaigns.owner_id   -> users.id
@@ -318,6 +375,13 @@ export class MockBackendClient implements BackendClient {
       out[rel.id] = byKey;
     }
     return out;
+  }
+
+  async getTableStats(params: GetTableStatsParams): Promise<TableStats> {
+    await delay(jitter(60, 180));
+    const columns =
+      params.table === "users" ? USERS_COLUMNS : genericColumns(params.table);
+    return { columns: columns.map((c) => mockColumnStats(params.table, c)) };
   }
 
   async getRecords(params: GetRecordsParams): Promise<RecordPage> {
