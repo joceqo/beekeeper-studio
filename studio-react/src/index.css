@@ -138,6 +138,7 @@ body {
 
 /* Glide data grid theming hook target lives in the grid component. */
 .gdg-wrapper {
+  position: relative;
   width: 100%;
   height: 100%;
 }

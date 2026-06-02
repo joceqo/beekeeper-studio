@@ -9,7 +9,7 @@ import {
   PanelRightOpen,
   PanelRightClose,
 } from "lucide-react";
-import { backend, type RecordPage, type TableDescription } from "@/ipc";
+import { backend, type ColumnStats, type RecordPage, type TableDescription } from "@/ipc";
 import { DataGrid, type SortState } from "./DataGrid";
 import { FilterBar } from "./FilterBar";
 import { DetailPanel } from "@/components/detail/DetailPanel";
@@ -43,6 +43,8 @@ const PAGE_SIZE = 100;
 export function TableView({ tabId, connectionId, schema, table }: Props) {
   const [page, setPage] = useState<RecordPage | null>(null);
   const [description, setDescription] = useState<TableDescription | null>(null);
+  // Per-column value stats (top_values + nullFraction), for semantic inference.
+  const [stats, setStats] = useState<Map<string, ColumnStats>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
@@ -123,6 +125,27 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
   }, [connectionId, schema, table, offset, sort, where, pushActivity, setStatus]);
 
   useEffect(load, [load]);
+
+  // Fetch per-column value stats once per (connection, schema, table). These
+  // drive semantic-type inference and don't depend on paging/sort/filter, so
+  // they live in their own effect. Best-effort: stays empty on failure.
+  useEffect(() => {
+    let cancelled = false;
+    setStats(new Map());
+    backend
+      .connect(connectionId)
+      .then((liveId) => backend.getTableStats({ connectionId: liveId, table, schema }))
+      .then((s) => {
+        if (cancelled) return;
+        setStats(new Map(s.columns.map((c) => [c.name, c])));
+      })
+      .catch(() => {
+        if (!cancelled) setStats(new Map());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [connectionId, schema, table]);
 
   // Reset to the first page whenever the filter changes so paging stays valid.
   useEffect(() => {
@@ -318,6 +341,7 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
               onRelationClick={onRelationClick}
               description={description}
               onFkClick={onFkClick}
+              stats={stats}
             />
           ) : null}
         </div>
@@ -340,6 +364,7 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
                 columnName={selection.columnName}
                 mode={selection.mode}
                 description={description}
+                stats={stats}
                 onClose={() => {
                   clearSelection(tabId);
                   toggleDock();

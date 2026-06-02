@@ -14,6 +14,11 @@ const log = rawLog.scope("McpTools");
 /** Max number of incoming relations counted by get_relation_counts in one call. */
 const MAX_RELATIONS = 50;
 
+/** Max number of columns profiled by get_table_stats in one call. */
+const MAX_STATS_COLUMNS = 30;
+/** Top-N most common values returned per column by get_table_stats. */
+const TOP_VALUES_LIMIT = 10;
+
 /** sId scheme for connections opened by the MCP server itself. */
 const mcpSessionId = (savedConnectionId: number) => `mcp:${savedConnectionId}`;
 
@@ -572,6 +577,115 @@ export function createTools(deps: ToolDeps): McpTool[] {
           truncated: (r.rows?.length ?? 0) > MAX_ROWS,
         }));
         return ok(trimmed);
+      },
+    },
+
+    {
+      name: "get_table_stats",
+      description:
+        "Per-column value statistics for a table, used to infer semantic types (email/url/color/ip/" +
+        "phone, etc.) and to drive cell formatting. For each column it returns the top ~10 most common " +
+        `values with their counts, plus the fraction of NULLs. Read-only; caps at ${MAX_STATS_COLUMNS} ` +
+        "columns per call. Cheap by construction (one grouped query per column, each LIMIT 10).",
+      inputSchema: {
+        connectionId: z.string().describe("Connection id from list_connections"),
+        table: z.string().describe("Table name"),
+        schema: z.string().optional().describe("Schema the table belongs to"),
+      },
+      async handler(args) {
+        const sId = String(args.connectionId);
+        // Read-only by construction (SELECT ... GROUP BY); requireExposed rejects "none".
+        const { s } = requireExposed(sId, defaultAccess);
+        const table = String(args.table);
+        const schema = args.schema ? String(args.schema) : undefined;
+
+        const { wrapIdentifier } = quotingForConnectionType(s.usedConfig?.connectionType);
+
+        const allColumns = await ConnHandlers["conn/listTableColumns"]({ table, schema, sId });
+        let columns = allColumns;
+        let truncated = false;
+        if (columns.length > MAX_STATS_COLUMNS) {
+          truncated = true;
+          log.warn(
+            `get_table_stats: ${columns.length} columns for ${schema ?? ""}.${table}, capping at ${MAX_STATS_COLUMNS}`
+          );
+          columns = columns.slice(0, MAX_STATS_COLUMNS);
+        }
+
+        const qualifiedTable = schema
+          ? `${wrapIdentifier(schema)}.${wrapIdentifier(table)}`
+          : wrapIdentifier(table);
+
+        const stats = await Promise.all(
+          columns.map(async (c) => {
+            const col = wrapIdentifier(c.columnName);
+            // Top values: one grouped query per column, ORDER BY count DESC LIMIT 10.
+            // NULLs are excluded from top_values; the null fraction is computed separately.
+            const topSql =
+              `SELECT ${col} AS value, count(*) AS cnt FROM ${qualifiedTable} ` +
+              `WHERE ${col} IS NOT NULL GROUP BY ${col} ORDER BY cnt DESC LIMIT ${TOP_VALUES_LIMIT}`;
+            const nullSql =
+              `SELECT count(*) AS total, count(${col}) AS non_null FROM ${qualifiedTable}`;
+
+            const scalar = (
+              firstRow: Record<string, unknown> | unknown[] | undefined,
+              key: string,
+              index: number
+            ): unknown => {
+              if (Array.isArray(firstRow)) return firstRow[index];
+              if (firstRow && typeof firstRow === "object") {
+                const obj = firstRow as Record<string, unknown>;
+                return obj[key] ?? Object.values(obj)[index];
+              }
+              return undefined;
+            };
+
+            try {
+              const [topRes, nullRes] = await Promise.all([
+                ConnHandlers["conn/executeQuery"]({ queryText: topSql, options: {}, sId }),
+                ConnHandlers["conn/executeQuery"]({ queryText: nullSql, options: {}, sId }),
+              ]);
+
+              const topRows = (topRes?.[0]?.rows ?? []) as (
+                | Record<string, unknown>
+                | unknown[]
+              )[];
+              const topValues = topRows.map((r) => {
+                const value = scalar(r, "value", 0);
+                const rawCount = scalar(r, "cnt", 1);
+                const count = Number(rawCount);
+                return {
+                  value: value === undefined ? null : (value as unknown),
+                  count: Number.isNaN(count) ? 0 : count,
+                };
+              });
+
+              const nullRow = (nullRes?.[0]?.rows ?? [])[0] as
+                | Record<string, unknown>
+                | unknown[]
+                | undefined;
+              const total = Number(scalar(nullRow, "total", 0));
+              const nonNull = Number(scalar(nullRow, "non_null", 1));
+              const nullFraction =
+                Number.isFinite(total) && total > 0 && Number.isFinite(nonNull)
+                  ? (total - nonNull) / total
+                  : undefined;
+
+              return {
+                name: c.columnName,
+                top_values: topValues,
+                ...(nullFraction === undefined ? {} : { nullFraction }),
+              };
+            } catch (err) {
+              log.warn(
+                `get_table_stats: stats failed for ${table}.${c.columnName}: ${(err as Error).message}`
+              );
+              return { name: c.columnName, top_values: [], error: (err as Error).message };
+            }
+          })
+        );
+
+        return ok({ table, schema: schema ?? null, truncated, columns: stats });
       },
     },
   ];

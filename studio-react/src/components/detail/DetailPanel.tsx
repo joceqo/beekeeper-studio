@@ -1,15 +1,17 @@
 import { useMemo } from "react";
 import { Link2, Eye, EyeOff, X } from "lucide-react";
-import type { CellValue, ColumnDef, TableDescription } from "@/ipc";
-import { semanticType } from "@/lib/relations";
-import { SemanticIcon } from "@/components/grid/SemanticIcon";
+import type { CellValue, ColumnDef, ColumnStats, TableDescription } from "@/ipc";
+import { semanticType, type SemanticType } from "@/lib/relations";
+import { inferSemanticType, resolveSemanticType } from "@/lib/semantic";
+import { SemanticIcon, SEMANTIC_LUCIDE } from "@/components/grid/SemanticIcon";
 import { useTabsStore, type DrilldownCrumb } from "@/store/tabs";
 import {
   useColumnConfigStore,
   FORMAT_LABELS,
   type ColumnFormat,
+  type SemanticOverride,
 } from "@/store/columnConfig";
-import { cn, IconButton, Button } from "@/ui";
+import { cn, IconButton, Button, Select, type SelectOption } from "@/ui";
 
 interface Props {
   tabId: string;
@@ -26,6 +28,8 @@ interface Props {
   mode: "row" | "column" | null;
   /** describeTable result, for FK / nullable metadata */
   description: TableDescription | null;
+  /** Per-column value stats, for inferred semantic type shown in the TypePicker. */
+  stats?: Map<string, ColumnStats>;
   onClose: () => void;
 }
 
@@ -58,6 +62,7 @@ export function DetailPanel({
   columnName,
   mode,
   description,
+  stats,
   onClose,
 }: Props) {
   const openTable = useTabsStore((s) => s.openTable);
@@ -88,6 +93,7 @@ export function DetailPanel({
         column={columns.find((c) => c.name === columnName) ?? null}
         columnName={columnName}
         fkRef={fks.get(columnName) ?? null}
+        stats={stats?.get(columnName)}
       />
     );
   } else if (mode === "row" && row) {
@@ -223,16 +229,69 @@ function FkLink({
 
 const FORMATS: ColumnFormat[] = ["text", "number", "currency", "percentage", "thousands"];
 
+/** TypePicker options: "auto" (use inferred), "none" (disable), then each type. */
+const SEMANTIC_TYPES: SemanticType[] = [
+  "text",
+  "number",
+  "currency",
+  "percentage",
+  "date_relative",
+  "bool",
+  "email",
+  "phone",
+  "url",
+  "image_url",
+  "json",
+  "code",
+  "color",
+  "rating",
+  "cidr",
+];
+
+const TYPE_LABELS: Record<SemanticType, string> = {
+  pk: "Primary key",
+  fk: "Foreign key",
+  relation: "Relation",
+  bool: "Boolean",
+  cidr: "IP / CIDR",
+  code: "Code",
+  color: "Color",
+  currency: "Currency",
+  date_relative: "Relative date",
+  email: "Email",
+  image_url: "Image",
+  json: "JSON",
+  number: "Number",
+  percentage: "Percentage",
+  phone: "Phone",
+  rating: "Rating",
+  url: "URL",
+  text: "Text",
+};
+
+/** A small leading icon + label for a TypePicker option. */
+function typeOptionLabel(type: SemanticType): React.ReactNode {
+  const Icon = SEMANTIC_LUCIDE[type];
+  return (
+    <span className="flex items-center gap-1.5">
+      <Icon size={12} className="text-text-muted" />
+      {TYPE_LABELS[type]}
+    </span>
+  );
+}
+
 function ColumnDetail({
   tabId,
   column,
   columnName,
   fkRef,
+  stats,
 }: {
   tabId: string;
   column: ColumnDef | null;
   columnName: string;
   fkRef: string | null;
+  stats?: ColumnStats;
 }) {
   const config = useColumnConfigStore((s) => s.byKey[`${tabId}::${columnName}`]) ?? {
     format: "text" as ColumnFormat,
@@ -240,12 +299,36 @@ function ColumnDetail({
   };
   const setFormat = useColumnConfigStore((s) => s.setFormat);
   const setHidden = useColumnConfigStore((s) => s.setHidden);
+  const setSemanticType = useColumnConfigStore((s) => s.setSemanticType);
+
+  const isFk = !!fkRef;
+  // The type the grid would use absent an override (PK/FK/relation, then value
+  // inference, then dataType fallback) — shown as the "auto" default.
+  const inferred: SemanticType = column
+    ? resolveSemanticType(column, { isFk, stats })
+    : "text";
+  // The value/name-only inference (ignores structural roles), for the hint.
+  const valueInferred = column
+    ? inferSemanticType(column.name, stats, column.dataType)
+    : null;
+  const override = config.semanticType;
+  const resolved: SemanticType = column
+    ? resolveSemanticType(column, { isFk, stats, override })
+    : "text";
+
+  // Picker value: "auto" when no override, else the override ("none" or a type).
+  const pickerValue: "auto" | SemanticOverride = override ?? "auto";
+  const pickerItems: SelectOption<"auto" | SemanticOverride>[] = [
+    { value: "auto", label: <span>Auto ({TYPE_LABELS[inferred]})</span> },
+    { value: "none", label: <span className="text-text-muted">None (disable)</span> },
+    ...SEMANTIC_TYPES.map((t) => ({ value: t, label: typeOptionLabel(t) })),
+  ];
 
   return (
     <div className="flex flex-col gap-3 p-3">
       <div>
         <div className="flex items-center gap-1.5">
-          {column && <SemanticIcon type={semanticType(column, !!fkRef)} size={12} />}
+          {column && <SemanticIcon type={resolved} size={12} />}
           <span className="font-mono text-md text-text-primary">{columnName}</span>
         </div>
         <div className="mt-0.5 font-mono text-xs text-text-muted">
@@ -264,6 +347,29 @@ function ColumnDetail({
           </div>
         )}
       </dl>
+
+      {/* Semantic-type override (TypePicker). "Auto" uses the inferred type;
+          "None" disables semantic rendering for this column. Persisted per
+          column in the columnConfig store. */}
+      <div>
+        <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-text-muted">
+          Semantic type
+        </div>
+        <Select<"auto" | SemanticOverride>
+          aria-label="Semantic type"
+          value={pickerValue}
+          items={pickerItems}
+          triggerClassName="w-full"
+          onValueChange={(v) =>
+            setSemanticType(tabId, columnName, v === "auto" ? undefined : v)
+          }
+        />
+        {valueInferred && override === undefined && (
+          <div className="mt-1 text-xs text-text-muted">
+            Detected from values: {TYPE_LABELS[valueInferred]}
+          </div>
+        )}
+      </div>
 
       {/* Format options — stored per column, applied by the grid. */}
       <div>

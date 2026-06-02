@@ -1,4 +1,8 @@
 import { create } from "zustand";
+import type { SemanticType } from "@/lib/relations";
+
+/** A TypePicker override: an explicit semantic type, or "none" to disable formatting. */
+export type SemanticOverride = SemanticType | "none";
 
 /**
  * Per-column display config: a cell-format mode and a visibility flag.
@@ -27,6 +31,11 @@ export const FORMAT_LABELS: Record<ColumnFormat, string> = {
 export interface ColumnConfig {
   format: ColumnFormat;
   hidden: boolean;
+  /**
+   * User override for the column's semantic type (TypePicker). When absent the
+   * grid uses the inferred type; `"none"` disables semantic rendering entirely.
+   */
+  semanticType?: SemanticOverride;
 }
 
 const DEFAULT: ColumnConfig = { format: "text", hidden: false };
@@ -56,6 +65,12 @@ interface ColumnConfigState {
   get: (tabId: string, column: string) => ColumnConfig;
   setFormat: (tabId: string, column: string, format: ColumnFormat) => void;
   setHidden: (tabId: string, column: string, hidden: boolean) => void;
+  /** Set/clear the semantic-type override. Pass `undefined` to clear (use inferred). */
+  setSemanticType: (
+    tabId: string,
+    column: string,
+    semanticType: SemanticOverride | undefined
+  ) => void;
 }
 
 export const useColumnConfigStore = create<ColumnConfigState>((set, get) => ({
@@ -72,6 +87,16 @@ export const useColumnConfigStore = create<ColumnConfigState>((set, get) => ({
     set((s) => {
       const k = key(tabId, column);
       const byKey = { ...s.byKey, [k]: { ...(s.byKey[k] ?? DEFAULT), hidden } };
+      persist(byKey);
+      return { byKey };
+    }),
+  setSemanticType: (tabId, column, semanticType) =>
+    set((s) => {
+      const k = key(tabId, column);
+      const next = { ...(s.byKey[k] ?? DEFAULT) };
+      if (semanticType === undefined) delete next.semanticType;
+      else next.semanticType = semanticType;
+      const byKey = { ...s.byKey, [k]: next };
       persist(byKey);
       return { byKey };
     }),
