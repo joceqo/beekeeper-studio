@@ -111,7 +111,8 @@ the `mcp-session-id` header), then `tools/call`s `list_saved_connections` /
   mouse-drag resize. See "App-shell layout" below.
 - `lucide-react` — icons
 - Inter Variable / JetBrains Mono Variable (`@fontsource-variable/*`)
-- Zustand — state (tabs, sidebar, theme, activity log, status, layout)
+- Zustand — state (tabs, sidebar, theme, activity log, status, layout, filters,
+  UI scale, transient command-palette/overlay UI)
 
 > Radix UI has been removed from the source. Base UI is the headless-primitive
 > layer now. (`@radix-ui/react-dialog` may still appear in `yarn.lock` as a
@@ -182,10 +183,10 @@ These screens now use the `src/ui` primitives instead of raw
   `<button>`s (multi-slot rows with icons, tags, paint dots, counts) — fine
   as-is.
 - **StatusBar** is text-only (no controls to migrate).
-- **Dialog / Drawer / Combobox / Popover / Menu / ContextMenu / Switch** are
-  built and exported but not yet adopted anywhere (no current feature needs
-  them); they are wired and available for upcoming work (settings, command
-  palette, context menus, write-confirm dialogs).
+- **Drawer / Combobox / Popover** are built and exported but not yet adopted
+  anywhere; they are wired and available for upcoming work (write-confirm
+  dialogs, etc.). `Dialog` / `Switch` / `SegmentedControl` are now used by the
+  command palette + settings dialog (see "Command palette + keybindings").
 
 ### Drilldown v2 + startup (recent work)
 
@@ -214,6 +215,70 @@ These screens now use the `src/ui` primitives instead of raw
   from a focused/pinned table (instead of all tables) and expanding neighbours on
   demand, with `get_schema_graph(rootTable, depth)`. Left as a separate
   follow-up per the spec; `SchemaGraphView` still renders the full graph.
+
+## Command palette + keybindings
+
+A SlashTable-style command palette (⌘K) and a global keybinding system, modeled
+on the `DEFAULT_KEYMAP` in [`../SLASHTABLE_ANALYSIS.md`](../SLASHTABLE_ANALYSIS.md)
+("Behavioral logic" / DEFAULT_KEYMAP).
+
+- **Keybinding registry** ([`src/lib/keymap.ts`](src/lib/keymap.ts)) — the
+  `DEFAULT_KEYMAP` (command id → `[{ shortcut:{key,mod,shift,alt,ctrl}, when? }]`,
+  multi-binding) plus `useGlobalKeybindings()`, a single capture-phase window
+  `keydown` listener mounted once in [`App.tsx`](src/App.tsx). `mod` is the
+  platform command key (⌘ on macOS, Ctrl elsewhere). `when` guards are evaluated
+  against live context — notably `!inputFocus` (suppressed while typing in an
+  `input` / `textarea` / `contenteditable` / Monaco editor) and `tableTab` (the
+  active tab is a table). The listener `preventDefault`s matches so browser
+  defaults like ⌘T / ⌘W / ⌘- don't fire.
+- **Command registry** ([`src/lib/commands.ts`](src/lib/commands.ts)) — a central
+  `useCommands()` hook returning `{ id, label, group, icon, run(), shortcut }`
+  resolved against the app stores/backend, plus a `run(id)` dispatcher. The
+  palette UI and the keybinding hook share this one list (so a shortcut and its
+  palette row always do the same thing). Shortcut hints are derived from
+  `DEFAULT_KEYMAP`.
+- **Command palette UI** ([`CommandPalette.tsx`](src/components/palette/CommandPalette.tsx))
+  — a Base UI `Dialog` modal; fuzzy-filtered (tiny inline subsequence matcher in
+  [`src/lib/fuzzy.ts`](src/lib/fuzzy.ts), no dependency added), grouped by
+  section, each row showing its label (mono) + a `Kbd` shortcut. ↑/↓ navigate,
+  Enter runs, Esc closes; searching switches to a flat ranked list.
+- **Connection switcher** ([`ConnectionSwitcher.tsx`](src/components/palette/ConnectionSwitcher.tsx))
+  — ⌘D opens a filterable list of saved connections (`backend.listConnections`);
+  selecting one sets it active in `useSidebarStore` (drives the explorer + new
+  tabs).
+- **Settings dialog** ([`SettingsDialog.tsx`](src/components/palette/SettingsDialog.tsx))
+  — ⌘, opens a minimal settings modal: theme toggle, UI scale +/−/reset, and a
+  vim-mode stub (persisted, not yet consumed by the editor).
+- **UI scale** ([`store/uiScale.ts`](src/store/uiScale.ts)) — ⌘= / ⌘- / ⌘0 apply
+  a `zoom` factor to the document root (persisted), scaling the whole shell.
+
+### Commands
+
+| Command | Shortcut | Action |
+| --- | --- | --- |
+| `core.palette` | ⌘K, ⌘P, `/` (when not typing) | Open the command palette |
+| `core.db-switcher` | ⌘D | Open the connection switcher |
+| `core.new-sql-tab` | ⌘T | New SQL/query tab |
+| `core.new-explorer-tab` | ⌘⇧E | Reveal + focus the Explorer (sidebar) |
+| `core.schema-graph` | ⌘⇧G | Open a schema-graph tab for the active connection |
+| `core.close-tab` | ⌘W | Close the active tab |
+| `core.next-tab` | ⌘⇧] | Activate the next tab |
+| `core.prev-tab` | ⌘⇧[ | Activate the previous tab |
+| `core.toggle-sidebar` | ⌘/ | Collapse/expand the sidebar |
+| `core.toggle-context-sidebar` | ⌘⇧/ | Collapse/expand the detail panel |
+| `core.toggle-log-panel` | ⌘J | Collapse/expand the activity log |
+| `core.zoom-in` | ⌘= (also ⌘+) | Zoom the UI in |
+| `core.zoom-out` | ⌘- | Zoom the UI out |
+| `core.zoom-reset` | ⌘0 | Reset UI zoom to 100% |
+| `core.focus-explorer-search` | ⇧T (when not typing) | Reveal + focus the sidebar search |
+| `core.reconnect` | ⇧R (when not typing) | Reconnect the active connection (`backend.connect`) |
+| `core.open-settings` | ⌘, | Open the settings dialog |
+| `table.add-filter` | `f` (table tab, when not typing) | Open + seed the FilterBar |
+
+Cross-component actions (focus the sidebar search, open the active table's
+FilterBar) flow through small "signal" counters in
+[`store/ui.ts`](src/store/ui.ts), so a command can ask a mounted component to do
+something it owns without holding a ref to it.
 
 ## App-shell layout (react-resizable-panels)
 

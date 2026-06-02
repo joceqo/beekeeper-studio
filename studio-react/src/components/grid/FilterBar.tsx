@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Filter, Plus, FolderPlus, X, Ban } from "lucide-react";
 import type { ColumnDef } from "@/ipc";
 import { Button, IconButton, Input, Select, Badge, cn } from "@/ui";
 import { useFilterStore } from "@/store/filters";
+import { useUiStore } from "@/store/ui";
 import {
   LIST_OPS,
   NO_VALUE_OPS,
@@ -33,6 +34,7 @@ export function FilterBar({ tabId, columns }: Props) {
   const [open, setOpen] = useState(false);
   const storedRoot = useFilterStore((s) => s.byTab[tabId]);
   const clearAll = useFilterStore((s) => s.clearAll);
+  const addCondition = useFilterStore((s) => s.addCondition);
 
   // Stable empty root for tabs with no edits yet (kept across renders).
   const [fallback] = useState<FilterGroup>(() =>
@@ -41,6 +43,20 @@ export function FilterBar({ tabId, columns }: Props) {
   const root = storedRoot ?? fallback;
 
   const activeCount = useMemo(() => countActiveConditions(root), [root]);
+
+  // "Add Filter" command (`f`): open the editor and seed an empty condition so
+  // the user lands directly in an editable row. Only the active table's bar
+  // reacts — inactive tabs are unmounted, so the signal targets the visible one.
+  const openFilterSignal = useUiStore((s) => s.openFilterSignal);
+  const lastSignal = useRef(openFilterSignal);
+  useEffect(() => {
+    if (openFilterSignal === lastSignal.current) return;
+    lastSignal.current = openFilterSignal;
+    setOpen(true);
+    if (countActiveConditions(useFilterStore.getState().getRoot(tabId)) === 0) {
+      addCondition(tabId, undefined, columns[0]?.name);
+    }
+  }, [openFilterSignal, tabId, columns, addCondition]);
 
   return (
     <div className="shrink-0 border-b border-border bg-bg-secondary">

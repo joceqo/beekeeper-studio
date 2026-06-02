@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronRight,
   ChevronDown,
@@ -22,6 +22,7 @@ import {
 import { useSidebarStore } from "@/store/sidebar";
 import { useLayoutStore } from "@/store/layout";
 import { useTabsStore } from "@/store/tabs";
+import { useUiStore } from "@/store/ui";
 import {
   buildExplorerTree,
   formatRowEstimate,
@@ -62,6 +63,16 @@ export function Sidebar() {
   const [schemas, setSchemas] = useState<Schema[]>([]);
   const [tables, setTables] = useState<TableSummary[]>([]);
   const [search, setSearch] = useState("");
+
+  // Focus the search input when a command requests it (⇧T / Focus Explorer Search).
+  const focusSearchSignal = useUiStore((s) => s.focusSearchSignal);
+  const searchRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (focusSearchSignal === 0) return;
+    // Defer to let the sidebar expand (if it was collapsed) before focusing.
+    const id = requestAnimationFrame(() => searchRef.current?.focus());
+    return () => cancelAnimationFrame(id);
+  }, [focusSearchSignal]);
 
   useEffect(() => {
     backend.listConnections().then((conns) => {
@@ -263,6 +274,7 @@ export function Sidebar() {
         <div className="flex items-center gap-1.5 rounded-sm border border-border bg-bg-primary px-2 py-1 focus-within:border-accent focus-within:ring-1 focus-within:ring-accent/40">
           <Search size={12} className="text-text-muted" />
           <input
+            ref={searchRef}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search tables…"

@@ -13,6 +13,11 @@ import { ActivityPanel } from "@/components/activity/ActivityPanel";
 import { DetailHostProvider, useDetailHost } from "@/components/shell/DetailDock";
 import { useLayoutStore } from "@/store/layout";
 import { useTabsStore } from "@/store/tabs";
+import { useCommands } from "@/lib/commands";
+import { useGlobalKeybindings } from "@/lib/keymap";
+import { CommandPalette } from "@/components/palette/CommandPalette";
+import { ConnectionSwitcher } from "@/components/palette/ConnectionSwitcher";
+import { SettingsDialog } from "@/components/palette/SettingsDialog";
 import { TooltipProvider, Toaster } from "@/ui";
 
 /** Thin resize handle styled with the design tokens: subtle line, accent on hover/drag. */
@@ -29,6 +34,30 @@ function VResize() {
     <PanelResizeHandle className="group relative h-px shrink-0 bg-border outline-none data-[resize-handle-state=drag]:bg-accent">
       <span className="absolute inset-x-0 -top-1 -bottom-1 group-hover:bg-accent/40 group-data-[resize-handle-state=drag]:bg-accent/40" />
     </PanelResizeHandle>
+  );
+}
+
+/**
+ * Mounts the global keybinding listener once, dispatching matched commands to
+ * the command registry, and renders the command-driven overlays (palette,
+ * connection switcher, settings). Kept as its own component so the keybinding
+ * hook can read the live command list + active-tab context.
+ */
+function CommandLayer() {
+  const { run } = useCommands();
+  const activeId = useTabsStore((s) => s.activeId);
+  const tabs = useTabsStore((s) => s.tabs);
+  const isTableTab = tabs.find((t) => t.id === activeId)?.kind === "table";
+
+  const getContext = useCallback(() => ({ tableTab: isTableTab }), [isTableTab]);
+  useGlobalKeybindings({ run, getContext });
+
+  return (
+    <>
+      <CommandPalette />
+      <ConnectionSwitcher />
+      <SettingsDialog />
+    </>
   );
 }
 
@@ -135,6 +164,7 @@ export default function App() {
 
           <StatusBar />
         </div>
+        <CommandLayer />
       </DetailHostProvider>
       <Toaster />
     </TooltipProvider>
