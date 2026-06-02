@@ -333,3 +333,82 @@ existing `lib/relations.ts`, `RelationView.tsx`, `useRelationCounts.ts`, the
 
 Order to build: §1 + §2 (inline counts + FK links) → §4 (header icons, cheap,
 high impact) → §3 (branching breadcrumb) → §5 (graph depth).
+
+---
+
+# Semantic types — detection + cell renderers (reverse-engineered, exact)
+
+## `inferSemanticType(columnName, stats, dbType)` — order of checks
+1. **By DB type (short-circuit):** timestamp/timestamptz → `date_relative`;
+   inet → `ip_address`; cidr → `cidr`; json → `json`.
+2. **By value sampling** — take the first 10 of `stats.top_values`, threshold
+   **≥50%** match (unless noted):
+   - email: `^[^\s@]+@[^\s@]+\.[^\s@]+$`
+   - url: `^https?://` → if **≥40%** also match
+     `\.(png|jpe?g|gif|webp|svg|bmp|tiff?)(\?|$)` → `image_url`, else `url`
+   - color: `^#([0-9a-f]{3}|[0-9a-f]{6})$`
+   - cidr / ip_address (octet validation)
+   - phone: exclude dates `\d{1,4}[-/]\d{1,2}[-/]\d{1,4}` and decimals
+     `\d+\.\d+`, then `^[+\d][\d\s().+-]{6,}$` with ≥7 digits
+3. **By column name (fallback):** `\bemail\b` → email;
+   `\b(image|img|avatar|photo|thumbnail|picture)(_url)?\b` → image_url.
+
+Needs a **`get_table_stats` exposing `top_values`** per column. Type can be
+overridden (TypePicker) or set to `none` (disable formatting). Each setting has
+a **scope**: current saved view vs table default (ScopeBadge).
+
+## Semantic type → renderer (full catalogue)
+| type | render |
+|---|---|
+| `bool` | true/false (handles 0/1, yes/no) |
+| `number` | numeric with thousands separators |
+| `currency` | currency value |
+| `percentage` | percent |
+| `date_relative` | relative time (+ epoch unit: nanos/millis/sec picker) |
+| `email` | mailto link · `phone` tel link · `url` clickable link |
+| `image_url` | thumbnail in cell + full-size hover preview card |
+| `json` | parsed + syntax-highlighted · `code` monospace + syntax hint |
+| `color` | **color swatch** next to the value |
+| `rating` | star rating |
+| `ip_address` / `cidr` | highlight octets/groups |
+Also: big text/json/interval cells sliced to a 4 KB preview (`…+N` marker),
+full value loaded on demand in a popout editor; array columns (text[]/int[]/
+uuid[]) get a first-class array editor.
+
+---
+
+# Explorer / sidebar parity (from the "achievements" screenshot)
+
+- **Connections**: folders (e.g. `docker`) + per-connection env **tag** badges
+  (`PRD`/`DEV`/`TST`) + a **paint** dot (colored). Active connection highlighted.
+  Header `postgres / mlc ⌘d` = the DB switcher.
+- **Explorer**: a **schema folder** (`public`) with the schema's table count on
+  the right (`200`); tables nested under it; **prefix-grouped sub-folders**
+  (`achievements` folder holds `achievements` + `achievement_categories`) — uses
+  the snake_case/camelCase tokenizer + join-tables-last + public-first settings.
+- **Per-table estimated row counts** on the right: `achievements 76`,
+  `action 595`, `attachments 57.7K`, `blog_article 269`. From Postgres
+  estimates (reltuples / pg_class), NOT count(*). → needs the MCP `list_tables`
+  to return an estimated row count per table (or a `get_table_stats`/schema
+  summary that includes it).
+- **Everything is JetBrains Mono** (sidebar entries, grid, values).
+- Column header shows the semantic icon + name (`T description`, palette-icon
+  `color`, `T icon`); the `color` column renders a swatch + hex.
+
+---
+
+# Next two agents (queue AFTER the running drilldown agent lands)
+
+**Agent A — Explorer/sidebar parity:** schema folders with table counts,
+prefix-grouped sub-folders (tokenizer + join-tables-last + public-first),
+per-table estimated row counts (needs MCP `list_tables`/summary to expose
+`estimatedRows`), connection folders + env tags + paint dots, mono font
+throughout. Touches studio-react sidebar + a small MCP backend addition
+(estimated row counts) — disjoint-ish, but run after to avoid churn.
+
+**Agent B — Semantic cell renderers:** implement the renderers above in the
+Glide grid keyed off `semanticType` (color swatch, image thumb+hover, json
+highlight, email/phone/url links, rating stars, number/currency/% via Intl,
+date_relative, code mono), plus `inferSemanticType` (needs `get_table_stats`
+top_values via MCP) and the ColumnDetail TypePicker (override + scope). Builds
+on the header-icon work the drilldown agent is adding.
