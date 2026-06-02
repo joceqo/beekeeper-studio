@@ -5,7 +5,7 @@ import { loadEncryptionKey } from '../../encryption_key'
 import { ConnectionString } from 'connection-string'
 import log from '@bksLogger'
 import { AzureCredsEncryptTransformer, EncryptTransformer, SurrealDbEncryptTransformer } from '../transformers/Transformers'
-import { IConnection, SshMode } from '@/common/interfaces/IConnection'
+import { IConnection, McpAccess, SshMode } from '@/common/interfaces/IConnection'
 import { AzureAuthOptions, BigQueryOptions, CassandraOptions, ConnectionType, ConnectionTypes, DynamoDBOptions, LibSQLOptions, RedshiftOptions, IamAuthOptions, SQLAnywhereOptions, SurrealDBOptions } from "@/lib/db/types"
 import { resolveHomePathToAbsolute } from "@/handlers/utils"
 import { ReadOnlyOrDefault } from "../validators/ReadOnlyOrDefault"
@@ -217,6 +217,11 @@ export class DbConnectionBase extends ApplicationEntity {
   @ReadOnlyOrDefault()
   @Column({type: 'boolean', nullable: false, default: false})
   readOnlyMode = true
+
+  // How the in-app MCP server may expose this connection to AI agents.
+  // 'read' is the safe default; 'none' hides it from MCP entirely.
+  @Column({ type: 'varchar', nullable: false, default: 'read' })
+  mcpAccess: McpAccess = 'read'
 
   // Used for Oracle only
   @Column({ type: 'simple-json', nullable: false })

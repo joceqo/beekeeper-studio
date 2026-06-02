@@ -170,6 +170,31 @@
                     <!-- <i class="material-icons" v-tooltip="'Limited to '">help_outlined</i> -->
                   </label>
                 </div>
+                <!-- AI access: how the in-app MCP server may expose this connection to AI agents -->
+                <div class="form-group ai-access" v-if="!shouldUpsell">
+                  <label for="mcpAccess">
+                    AI Access
+                    <i
+                      class="material-icons help-icon"
+                      v-tooltip="{ content: mcpAccessTooltip, html: true }"
+                    >help_outlined</i>
+                  </label>
+                  <select
+                    id="mcpAccess"
+                    name="mcpAccess"
+                    class="form-control"
+                    v-model="config.mcpAccess"
+                  >
+                    <option
+                      v-for="option in mcpAccessOptions"
+                      :key="option.value"
+                      :value="option.value"
+                    >
+                      {{ option.label }}
+                    </option>
+                  </select>
+                  <span class="hint">{{ mcpAccessHint }}</span>
+                </div>
                 <!-- TEST AND CONNECT -->
                 <div v-if="!shouldUpsell" class="test-connect row flex-middle">
                   <span class="expand" />
@@ -311,6 +336,11 @@ export default Vue.extend({
       loadingSSOModalOpened: false,
       version: this.$config.appVersion,
       isConfigReady: false,
+      mcpAccessOptions: [
+        { value: 'none', label: 'Hidden' },
+        { value: 'read', label: 'Read' },
+        { value: 'write', label: 'Write' },
+      ],
     }
   },
   computed: {
@@ -352,6 +382,20 @@ export default Vue.extend({
     },
     determineLabelColor() {
       return this.config.labelColor == "default" ? '' : `connection-label-color-${this.config.labelColor}`
+    },
+    mcpAccessTooltip() {
+      return "Controls how AI agents reach this connection through the built-in MCP server. Hidden keeps it off MCP entirely."
+    },
+    mcpAccessHint() {
+      switch (this.config.mcpAccess) {
+        case 'none':
+          return "Hidden from AI agents. The MCP server never lists or opens this connection."
+        case 'write':
+          return "AI agents may run any SQL, including INSERT, UPDATE, DELETE, and DDL."
+        case 'read':
+        default:
+          return "AI agents may run read-only queries (SELECT/WITH/EXPLAIN/SHOW)."
+      }
     },
     rootBindings() {
       return [

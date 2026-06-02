@@ -3,6 +3,14 @@ import { Transport } from "../transport"
 
 export type SshMode = null | 'agent' | 'userpass' | 'keyfile'
 
+/**
+ * How the in-app MCP server may expose a connection to AI agents:
+ *   - 'none'  → hidden; never listed or opened over MCP
+ *   - 'read'  → read-only statements only (SELECT/WITH/EXPLAIN/SHOW)
+ *   - 'write' → any SQL, including INSERT/UPDATE/DELETE and DDL
+ */
+export type McpAccess = 'none' | 'read' | 'write'
+
 export function isUltimateType(s: ConnectionType) {
   const types: ConnectionType[] = [
     'oracle',
@@ -50,6 +58,7 @@ export interface ISimpleConnection extends Transport {
   sslKeyFile: Nullable<string>
   sslRejectUnauthorized: boolean
   readOnlyMode: boolean
+  mcpAccess: McpAccess
   labelColor?: Nullable<string>
   trustServerCertificate?: boolean
   serviceName: Nullable<string>
