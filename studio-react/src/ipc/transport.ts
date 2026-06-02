@@ -28,6 +28,11 @@ function uuidv4(): string {
 
 type Listener = (input: unknown) => void;
 
+/** Verbose per-request logging when VITE_DEBUG_IPC=1 (errors are always logged). */
+const DEBUG_IPC =
+  typeof import.meta !== "undefined" &&
+  (import.meta as { env?: Record<string, string> }).env?.VITE_DEBUG_IPC === "1";
+
 interface QueuedMessage {
   handlerName: string;
   args: Record<string, unknown> | undefined;
@@ -76,7 +81,7 @@ export class MessagePortTransport implements BackendTransport {
   private portsRequested = false;
   private readonly replyHandlers = new Map<
     string,
-    { resolve: (value: unknown) => void; reject: (reason: unknown) => void }
+    { resolve: (value: unknown) => void; reject: (reason: unknown) => void; name: string }
   >();
   private readonly listeners: { type: string; id: string; listener: Listener }[] = [];
   private readonly messageQueue: QueuedMessage[] = [];
@@ -96,7 +101,10 @@ export class MessagePortTransport implements BackendTransport {
         const handler = this.replyHandlers.get(id);
         if (handler) {
           this.replyHandlers.delete(id);
-          const err = new Error(error);
+          // Always log backend errors with the handler name — the renderer
+          // otherwise only sees an opaque message and no operation context.
+          console.warn(`[ipc] ${handler.name} failed:`, error);
+          const err = new Error(`${handler.name}: ${error ?? "unknown error"}`);
           if (stack) err.stack = stack;
           handler.reject(err);
         }
@@ -107,6 +115,7 @@ export class MessagePortTransport implements BackendTransport {
         const handler = this.replyHandlers.get(id);
         if (handler) {
           this.replyHandlers.delete(id);
+          if (DEBUG_IPC) console.debug(`[ipc] ${handler.name} ✓`);
           handler.resolve(payload);
         }
         return;
@@ -123,7 +132,8 @@ export class MessagePortTransport implements BackendTransport {
     if (this.messageQueue.length > 0) {
       for (const { handlerName, args, id, resolve, reject } of this.messageQueue) {
         const merged = { sId: this._sId, ...(args ?? {}) };
-        this.replyHandlers.set(id, { resolve, reject });
+        this.replyHandlers.set(id, { resolve, reject, name: handlerName });
+        if (DEBUG_IPC) console.debug(`[ipc] → ${handlerName} (queued)`);
         port.postMessage({ id, name: handlerName, args: merged });
       }
       this.messageQueue.length = 0;
@@ -148,7 +158,8 @@ export class MessagePortTransport implements BackendTransport {
         return;
       }
       const merged = { sId: this._sId, ...(args ?? {}) };
-      this.replyHandlers.set(id, { resolve: resolve as (v: unknown) => void, reject });
+      this.replyHandlers.set(id, { resolve: resolve as (v: unknown) => void, reject, name });
+      if (DEBUG_IPC) console.debug(`[ipc] → ${name}`);
       this.port.postMessage({ id, name, args: merged });
     });
   }
