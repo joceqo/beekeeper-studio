@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
+import "./lib/monaco"; // configure @monaco-editor/react to use the local (offline) Monaco
 import App from "./App";
 import { transport } from "./ipc/transport";
 
