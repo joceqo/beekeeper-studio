@@ -26,6 +26,72 @@ yarn preview    # serve the production build
 yarn typecheck  # tsc only
 ```
 
+## Run it as Beekeeper's Electron renderer against the REAL backend (Phase C "C0")
+
+This is the **C0** milestone from [`../REDESIGN.md`](../REDESIGN.md): studio-react
+runs as the Electron **renderer**, receives the renderer↔utility `MessagePort` via
+the existing preload handshake, and drives the **real** Beekeeper backend through
+[`ElectronBackendClient`](src/ipc/electronClient.ts) — **no MCP HTTP server
+involved**. It is gated behind the `BKS_REACT` env flag so the default Vue app is
+untouched.
+
+The transport ([`src/ipc/transport.ts`](src/ipc/transport.ts)) is a Vue-free port
+of the Vue app's `UtilityConnection`: it speaks the exact wire framing from
+[`../REACT_IPC_CONTRACT.md`](../REACT_IPC_CONTRACT.md) §1.3 —
+`port.postMessage({ id, name, args: { sId, ...args } })` out; `{ id, type:
+'reply'|'error', data|error, stack }` back; `{ type, input }` server pushes — with
+the same queue-before-port + lazy `window.main.requestPorts()` behaviour. The
+handshake is wired in [`src/main.tsx`](src/main.tsx) (`attachPortListener()` +
+`window.onmessage` → `transport.setPort(port, sId)`), mirroring
+`renderer.ts:205-215`.
+
+`ElectronBackendClient` maps the `BackendClient` interface onto `conn/*` handlers:
+`listConnections` → `appdb/saved/find`; `connect` → `conn/create` (with `osUser`
+from `window.main.fetchUsername()`, mirroring the Vue store) opening a saved
+connection into the single session this window owns; `listSchemas` →
+`conn/listSchemas`; `listTables` → `conn/listTables`+`conn/listViews`;
+`describeTable` → `conn/listTableColumns`+`getPrimaryKeys`+`listTableIndexes`+
+`getTableKeys`+`getIncomingKeys`; `getRecords` → `conn/selectTop`; `executeQuery`
+→ `conn/executeQuery`; relation counts / page counts run grouped `SELECT`s via
+`conn/executeQuery` and degrade to empty on error; `getTableStats` degrades to
+empty (no dedicated handler).
+
+### Run both modes
+
+```bash
+# DEFAULT (Vue) — unchanged. BKS_REACT unset:
+cd apps/studio && yarn electron:serve         # loads the Vue renderer (localhost:3003)
+
+# REACT (C0) — two terminals:
+cd studio-react && yarn dev                    # studio-react Vite dev server on :5273
+cd apps/studio  && BKS_REACT=1 yarn electron:serve   # Electron loads :5273 as the renderer
+```
+
+With `BKS_REACT=1`, the Electron window loads studio-react with the **same
+preload**, hands it the `MessagePort`, and studio-react: lists saved connections
+(sidebar), opens one via `conn/create`, lists its tables, and shows real rows over
+the port — proving the seam without MCP.
+
+- `BKS_REACT_URL` overrides the dev URL (default `http://localhost:5273`).
+- Inside the Electron renderer, [`src/ipc/index.ts`](src/ipc/index.ts) auto-detects
+  the preload bridge (`window.main`) and selects `ElectronBackendClient`
+  automatically — no `VITE_BACKEND` needed. Set `VITE_BACKEND=electron` to force it,
+  or `VITE_BACKEND=mock` to force the mock even inside Electron.
+
+### Deferred for C0
+
+- **Production (packaged) load.** `WindowBuilder` points the prod path at
+  `file://…/studio-react/index.html`, but the electron-builder config does not yet
+  copy `studio-react/dist` into the packaged resources. C0 is verified via the dev
+  server (`yarn dev`), which the spec accepts. A follow-up should add a build step
+  that copies `studio-react/dist` and an `app://`-style protocol (or adjust the
+  file path) so `BKS_REACT=1` works in a packaged build.
+- **Total row counts** for the grid are estimated from the page size (no
+  `conn/getTableLength` call yet); wire `getTableLength` for exact totals later.
+- **Cancelable queries / pushes.** The transport supports server pushes
+  (transaction-timeout events) but the C0 client uses one-shot `conn/executeQuery`
+  (no `conn/query`+`query/execute` cancel handle). Add later for the editor.
+
 ## Run it against a REAL database (via the app's MCP server)
 
 The app ships an in-process **MCP** (Model Context Protocol) server over loopback
@@ -77,11 +143,13 @@ browser dev server can call it; non-loopback origins are not granted CORS.
 The app picks its `BackendClient` at startup from Vite env flags
 ([`src/ipc/index.ts`](src/ipc/index.ts)):
 
-| Env | Client |
+| Env / environment | Client |
 | --- | --- |
-| _(unset / anything else)_ | `MockBackendClient` (in-memory canned data) — **default** |
+| `VITE_BACKEND=electron` | `ElectronBackendClient` (real backend over the renderer `MessagePort`) |
+| running inside Electron (`window.main` present), no flag | `ElectronBackendClient` (auto-detected) |
 | `VITE_BACKEND=mcp` | `McpBackendClient` (real DB via MCP HTTP) |
 | `VITE_MCP_URL=<url>` | overrides the MCP endpoint (default `http://127.0.0.1:27500/mcp`) |
+| `VITE_BACKEND=mock`, or plain browser with no flag | `MockBackendClient` (in-memory canned data) — **default** |
 
 `McpBackendClient` ([`src/ipc/mcpClient.ts`](src/ipc/mcpClient.ts)) implements the
 exact same `BackendClient` interface: it lazily `initialize`s a session (capturing
@@ -439,18 +507,11 @@ The type shapes mirror what the Electron backend already exposes (the same
 `get_records` / `execute_query` operations used by Beekeeper's MCP server and
 the `IBasicDatabaseClient` contract).
 
-**To wire the real backend** (Phase C, inside Electron):
-
-1. Add an `ElectronBackendClient implements BackendClient` under `src/ipc/`
-   that, instead of returning canned data, does
-   `$util.send('conn/<handler>', args)` over the renderer↔utility `MessagePort`
-   (the same handshake `renderer.ts` uses today: `window.onmessage` →
-   `setPort(port, sId)`).
-2. Map each interface method to its existing handler name (e.g.
-   `getRecords` → `conn/selectTop`, `executeQuery` → `conn/query`,
-   `listTables` → `conn/listTables`).
-3. Swap the one export in `src/ipc/index.ts`:
-   `export { backend } from "./electronClient"`.
-
-No UI component changes are required — every view consumes `BackendClient`
-only. Stores (`src/store/*`) and components never import the mock directly.
+**The real backend is now wired** (Phase C "C0", see the Electron-renderer section
+above): [`ElectronBackendClient`](src/ipc/electronClient.ts) implements
+`BackendClient` over the renderer `MessagePort` via
+[`src/ipc/transport.ts`](src/ipc/transport.ts), and [`src/ipc/index.ts`](src/ipc/index.ts)
+selects it when `VITE_BACKEND=electron` or when the Electron preload bridge is
+detected at runtime. No UI component changes were required — every view consumes
+`BackendClient` only. Stores (`src/store/*`) and components never import a concrete
+client directly.

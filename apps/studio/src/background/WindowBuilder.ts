@@ -60,10 +60,24 @@ class BeekeeperWindow {
       show: false,
     })
 
+    // Phase C "C0": when BKS_REACT is set, load the studio-react renderer
+    // instead of the Vue app (REDESIGN.md Phase C). The same preload + the
+    // existing MessagePort handoff are reused, so the React renderer drives the
+    // real backend over the port. Unset -> the default Vue path below, untouched.
+    // dev  -> the studio-react Vite dev server (yarn dev, port 5273)
+    // prod -> the built studio-react/dist/index.html loaded via file://
+    const reactRenderer = !!process.env.BKS_REACT
+    const reactDevUrl = process.env.BKS_REACT_URL || 'http://localhost:5273'
+
     const devUrl = 'http://localhost:3003'
     const startUrl = 'app://./index.html'
-    const appUrl = platformInfo.isDevelopment ? devUrl : startUrl
+    let appUrl = platformInfo.isDevelopment ? devUrl : startUrl
     // const appUrl = startUrl
+    if (reactRenderer) {
+      appUrl = platformInfo.isDevelopment
+        ? reactDevUrl
+        : `file://${path.join(__dirname, '..', 'studio-react', 'index.html')}`
+    }
     const queryObj: any = openOptions ? { ...openOptions } : {}
 
     if (platformInfo.isWayland) {
