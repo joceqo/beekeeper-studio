@@ -621,6 +621,8 @@ export function DataGrid({
         columns={gridColumns}
         rows={rows.length}
         rowMarkers="number"
+        rowHeight={30}
+        headerHeight={32}
         smoothScrollX
         smoothScrollY
         width="100%"

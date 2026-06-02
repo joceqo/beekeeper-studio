@@ -10,7 +10,7 @@ import { cn } from "@/lib/cn";
  * - danger:  destructive accent
  */
 export const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-1.5 rounded-sm font-medium outline-none transition-colors disabled:pointer-events-none disabled:opacity-50 focus-visible:ring-1 focus-visible:ring-accent",
+  "inline-flex items-center justify-center gap-1.5 rounded-sm font-medium outline-none transition-colors duration-100 ease-out disabled:pointer-events-none disabled:opacity-50 focus-visible:ring-1 focus-visible:ring-accent",
   {
     variants: {
       variant: {

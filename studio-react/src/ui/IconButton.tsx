@@ -7,7 +7,7 @@ import { cn } from "@/lib/cn";
  * Replaces the ad-hoc `.grid-toolbar-btn` / `.rail-btn` CSS classes.
  */
 export const iconButtonVariants = cva(
-  "inline-flex shrink-0 items-center justify-center rounded-sm outline-none transition-colors disabled:pointer-events-none disabled:opacity-40 focus-visible:ring-1 focus-visible:ring-accent",
+  "inline-flex shrink-0 items-center justify-center rounded-sm outline-none transition-colors duration-100 ease-out disabled:pointer-events-none disabled:opacity-40 focus-visible:ring-1 focus-visible:ring-accent",
   {
     variants: {
       variant: {

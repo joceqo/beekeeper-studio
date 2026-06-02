@@ -31,13 +31,13 @@ export function Tabs({ value, onValueChange, items, className }: TabsProps) {
             key={item.value}
             value={item.value}
             className={cn(
-              "relative px-3 py-2 text-md text-text-secondary outline-none transition-colors hover:text-text-primary data-[selected]:text-text-primary"
+              "relative px-3 py-2 text-md text-text-secondary outline-none transition-colors duration-100 ease-out hover:text-text-primary data-[selected]:text-text-primary"
             )}
           >
             {item.label}
           </BaseTabs.Tab>
         ))}
-        <BaseTabs.Indicator className="absolute bottom-0 left-0 h-0.5 w-[var(--active-tab-width)] translate-x-[var(--active-tab-left)] bg-accent transition-all" />
+        <BaseTabs.Indicator className="absolute bottom-0 left-0 h-0.5 w-[var(--active-tab-width)] translate-x-[var(--active-tab-left)] bg-accent transition-all duration-150 ease-out" />
       </BaseTabs.List>
     </BaseTabs.Root>
   );

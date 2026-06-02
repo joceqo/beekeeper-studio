@@ -49,16 +49,16 @@ export function ActivityLogTable() {
             <div
               key={e.id}
               onClick={() => setExpanded(isOpen ? null : e.id)}
-              className="cursor-pointer border-b border-border/40 hover:bg-bg-hover"
+              className="cursor-pointer border-b border-border/40 transition-colors duration-100 ease-out hover:bg-bg-hover"
             >
               <div
                 className="grid items-center gap-2 px-3 py-1"
                 style={{ gridTemplateColumns: COLS }}
               >
-                <span className="font-mono text-text-muted">{e.time}</span>
+                <span className="font-mono tabular-nums text-text-muted">{e.time}</span>
                 <span
                   className={cn(
-                    "w-fit rounded-sm px-1.5 py-px text-xs font-medium",
+                    "w-fit rounded-sm px-1.5 py-px text-xs font-medium uppercase tracking-wide",
                     CAT_COLOR[e.category]
                   )}
                 >
@@ -75,10 +75,10 @@ export function ActivityLogTable() {
                 >
                   {e.sql}
                 </span>
-                <span className="text-right font-mono text-text-muted">
+                <span className="text-right font-mono tabular-nums text-text-muted">
                   {(e.durationMs / 1000).toFixed(2)}s
                 </span>
-                <span className="text-right font-mono text-text-secondary">
+                <span className="text-right font-mono tabular-nums text-text-secondary">
                   {e.rows ?? "—"}
                 </span>
               </div>

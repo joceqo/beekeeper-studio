@@ -108,9 +108,13 @@ body,
 body {
   font-family: var(--font-sans);
   font-size: var(--text-base);
+  line-height: 1.5;
   background-color: var(--color-bg-primary);
   color: var(--color-text-primary);
+  /* Match SlashTable's Inter character variants + crisp smoothing. */
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   overflow: hidden;
 }
 
@@ -118,22 +122,27 @@ body {
   box-sizing: border-box;
 }
 
+/* Thin, theme-colored, overlay-style scrollbars (match SlashTable). */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--color-bg-tertiary);
-  border-radius: 6px;
-  border: 2px solid transparent;
-  background-clip: content-box;
+  background: var(--color-border);
+  border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-bg-surface);
-  background-clip: content-box;
+  background: var(--color-text-muted);
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
 }
 
 /* Glide data grid theming hook target lives in the grid component. */

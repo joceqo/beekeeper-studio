@@ -27,16 +27,16 @@ export function TabStrip() {
               key={t.id}
               onClick={() => setActive(t.id)}
               className={cn(
-                "group relative flex h-8 max-w-[200px] shrink-0 cursor-pointer items-center gap-1.5 border-r border-border px-3 text-md",
+                "group relative flex h-8 max-w-[200px] shrink-0 cursor-pointer items-center gap-1.5 border-r border-border px-3 text-md transition-colors duration-100 ease-out",
                 active
                   ? "bg-bg-primary text-text-primary"
-                  : "bg-bg-secondary text-text-secondary hover:bg-bg-hover"
+                  : "bg-bg-secondary text-text-muted hover:bg-bg-hover hover:text-text-secondary"
               )}
             >
               {active && (
                 <span className="absolute inset-x-0 top-0 h-0.5 bg-accent" />
               )}
-              <span className={cn(active ? "text-accent" : "text-text-muted")}>
+              <span className={cn("shrink-0", active ? "text-accent" : "text-text-muted")}>
                 <TabIcon kind={t.kind} />
               </span>
               <span className="truncate font-mono">{t.title}</span>
@@ -47,7 +47,7 @@ export function TabStrip() {
                   e.stopPropagation();
                   close(t.id);
                 }}
-                className="ml-1 opacity-0 hover:bg-bg-tertiary group-hover:opacity-100"
+                className="-mr-1 ml-auto text-text-muted opacity-0 hover:bg-bg-tertiary hover:text-text-primary group-hover:opacity-100"
               >
                 <X size={12} />
               </IconButton>
@@ -60,7 +60,7 @@ export function TabStrip() {
           size="lg"
           onClick={openQuery}
           aria-label="New query tab"
-          className="h-8 w-8 rounded-none"
+          className="ml-0.5 h-8 w-8 shrink-0 rounded-none text-text-muted"
         >
           <Plus size={15} />
         </IconButton>

@@ -276,7 +276,7 @@ function RowDetail({
               <div
                 key={c.name}
                 className={cn(
-                  "flex flex-col gap-1 border-b border-border/60 px-3 py-2",
+                  "flex flex-col gap-1 border-b border-border/60 px-3 py-1.5 transition-colors duration-100 ease-out",
                   dirty && "bg-accent-subtle/40"
                 )}
               >

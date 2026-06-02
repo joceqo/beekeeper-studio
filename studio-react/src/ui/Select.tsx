@@ -10,7 +10,7 @@ export interface SelectOption<T extends string = string> {
 }
 
 const triggerVariants = cva(
-  "inline-flex items-center justify-between gap-1.5 rounded-sm border border-border bg-bg-primary text-text-primary outline-none transition-colors hover:bg-bg-hover focus-visible:border-accent focus-visible:ring-1 focus-visible:ring-accent/40 data-[popup-open]:border-accent disabled:opacity-50",
+  "inline-flex items-center justify-between gap-1.5 rounded-sm border border-border bg-bg-primary text-text-primary outline-none transition-colors duration-100 ease-out hover:bg-bg-hover focus-visible:border-accent focus-visible:ring-1 focus-visible:ring-accent/40 data-[popup-open]:border-accent disabled:opacity-50",
   {
     variants: {
       size: {

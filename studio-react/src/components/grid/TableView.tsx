@@ -318,13 +318,13 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
               <ChevronLeft size={13} className={offset === 0 ? "opacity-30" : ""} />
             </IconButton>
           </Tooltip>
-          <span className="font-mono text-xs text-text-muted">page {pageNum}</span>
+          <span className="font-mono text-xs tabular-nums text-text-muted">page {pageNum}</span>
           <Tooltip content="Next page">
             <IconButton onClick={onNext} disabled={!hasNext} aria-label="Next page">
               <ChevronRight size={13} className={!hasNext ? "opacity-30" : ""} />
             </IconButton>
           </Tooltip>
-          <span className="text-xs text-text-muted">
+          <span className="font-mono text-xs tabular-nums text-text-muted">
             {page ? `${page.loaded} loaded · rows ${offset + 1}–${offset + page.loaded}` : "—"}
           </span>
           <div className="mx-1 h-4 w-px bg-border" />

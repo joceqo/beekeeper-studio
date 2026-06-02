@@ -161,8 +161,10 @@ export function Sidebar() {
       <button
         key={c.id}
         className={cn(
-          "flex w-full items-center gap-1 rounded-sm px-1.5 py-1 text-left font-mono text-md hover:bg-bg-hover",
-          isActive && "bg-bg-active"
+          "flex w-full items-center gap-1 rounded-sm px-1.5 py-1 text-left font-mono text-md transition-colors duration-100 ease-out hover:bg-bg-hover",
+          isActive
+            ? "bg-accent-subtle text-text-primary"
+            : "text-text-secondary"
         )}
         onClick={() => {
           setActiveConnection(c.id);
@@ -189,7 +191,10 @@ export function Sidebar() {
         )}
         <span className="truncate">{c.name}</span>
         {c.tag && (
-          <Badge tone={TAG_TONE[c.tagColor ?? "neutral"]} className="ml-auto font-mono">
+          <Badge
+            tone={TAG_TONE[c.tagColor ?? "neutral"]}
+            className="ml-auto font-mono uppercase tracking-wide"
+          >
             {c.tag}
           </Badge>
         )}
@@ -232,7 +237,7 @@ export function Sidebar() {
           return (
             <div key={folder}>
               <button
-                className="flex w-full items-center gap-1 rounded-sm px-1.5 py-1 text-left text-md text-text-secondary hover:bg-bg-hover"
+                className="flex w-full items-center gap-1 rounded-sm px-1.5 py-1 text-left text-md text-text-secondary transition-colors duration-100 ease-out hover:bg-bg-hover hover:text-text-primary"
                 onClick={() => toggleGroup(id)}
               >
                 {open ? (
@@ -246,7 +251,7 @@ export function Sidebar() {
                   <Folder size={13} className="text-text-muted" />
                 )}
                 <span className="truncate">{folder}</span>
-                <span className="ml-auto text-xs text-text-muted">{items.length}</span>
+                <span className="ml-auto text-xs tabular-nums text-text-muted">{items.length}</span>
               </button>
               {open && <div className="pl-3">{items.map(renderConnection)}</div>}
             </div>
@@ -271,7 +276,7 @@ export function Sidebar() {
         </Tooltip>
       </div>
       <div className="px-2 pb-2">
-        <div className="flex items-center gap-1.5 rounded-sm border border-border bg-bg-primary px-2 py-1 focus-within:border-accent focus-within:ring-1 focus-within:ring-accent/40">
+        <div className="flex items-center gap-1.5 rounded-sm border border-border bg-bg-primary px-2 py-1 transition-colors duration-100 ease-out focus-within:border-accent focus-within:ring-1 focus-within:ring-accent/40">
           <Search size={12} className="text-text-muted" />
           <input
             ref={searchRef}
@@ -288,7 +293,7 @@ export function Sidebar() {
           return (
             <div key={sch.id}>
               <button
-                className="flex w-full items-center gap-1 rounded-sm px-1.5 py-1 text-left text-md text-text-secondary hover:bg-bg-hover"
+                className="flex w-full items-center gap-1 rounded-sm px-1.5 py-1 text-left text-md text-text-secondary transition-colors duration-100 ease-out hover:bg-bg-hover hover:text-text-primary"
                 onClick={() => toggleGroup(sch.id)}
               >
                 {open ? (
@@ -302,7 +307,7 @@ export function Sidebar() {
                   <Folder size={13} className="text-text-muted" />
                 )}
                 <span className="truncate">{sch.schema}</span>
-                <span className="ml-auto text-xs text-text-muted">{sch.tableCount}</span>
+                <span className="ml-auto text-xs tabular-nums text-text-muted">{sch.tableCount}</span>
               </button>
               {open && (
                 <div className="pl-3">
@@ -347,12 +352,12 @@ function ExplorerNodeRow({
     const rows = formatRowEstimate(t.rowEstimate);
     return (
       <button
-        className="flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-md hover:bg-bg-hover"
+        className="flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-md transition-colors duration-100 ease-out hover:bg-bg-hover"
         onClick={() => onOpenTable(t)}
       >
         <TableIcon type={t.type} />
         <span className="truncate text-text-secondary">{t.name}</span>
-        {rows && <span className="ml-auto text-xs text-text-muted">{rows}</span>}
+        {rows && <span className="ml-auto text-xs tabular-nums text-text-muted">{rows}</span>}
       </button>
     );
   }
@@ -361,7 +366,7 @@ function ExplorerNodeRow({
   return (
     <div>
       <button
-        className="flex w-full items-center gap-1 rounded-sm px-1.5 py-1 text-left text-md text-text-secondary hover:bg-bg-hover"
+        className="flex w-full items-center gap-1 rounded-sm px-1.5 py-1 text-left text-md text-text-secondary transition-colors duration-100 ease-out hover:bg-bg-hover hover:text-text-primary"
         onClick={() => onToggleGroup(node.id)}
       >
         {open ? (
@@ -375,7 +380,7 @@ function ExplorerNodeRow({
           <Folder size={12} className="text-text-muted" />
         )}
         <span className="truncate">{node.label}</span>
-        <span className="ml-auto text-xs text-text-muted">{node.children.length}</span>
+        <span className="ml-auto text-xs tabular-nums text-text-muted">{node.children.length}</span>
       </button>
       {open && (
         <div className="pl-3">
@@ -384,12 +389,12 @@ function ExplorerNodeRow({
             return (
               <button
                 key={`${child.table.schema}.${child.table.name}`}
-                className="flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-md hover:bg-bg-hover"
+                className="flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-md transition-colors duration-100 ease-out hover:bg-bg-hover"
                 onClick={() => onOpenTable(child.table)}
               >
                 <TableIcon type={child.table.type} />
                 <span className="truncate text-text-secondary">{child.table.name}</span>
-                {rows && <span className="ml-auto text-xs text-text-muted">{rows}</span>}
+                {rows && <span className="ml-auto text-xs tabular-nums text-text-muted">{rows}</span>}
               </button>
             );
           })}
