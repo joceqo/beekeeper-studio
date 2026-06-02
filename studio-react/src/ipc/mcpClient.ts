@@ -5,6 +5,7 @@ import type {
   Connection,
   GetRecordsParams,
   GetRelationCountsParams,
+  GetSchemaGraphOptions,
   GetTableStatsParams,
   PageRelationCounts,
   PageRelationCountsParams,
@@ -13,11 +14,13 @@ import type {
   RelationCount,
   Schema,
   SchemaGraph,
+  SchemaGraphEdge,
   TableDescription,
   TableStats,
   TableSummary,
   TopValue,
 } from "./types";
+import { graphKey, reachableKeys, rootKeyOf } from "@/lib/graph";
 
 /**
  * BackendClient implementation that talks to Beekeeper Studio's in-app MCP
@@ -640,8 +643,12 @@ export class McpBackendClient implements BackendClient {
     };
   }
 
-  async getSchemaGraph(connectionId: string, schema?: string): Promise<SchemaGraph> {
+  async getSchemaGraph(
+    connectionId: string,
+    options?: GetSchemaGraphOptions
+  ): Promise<SchemaGraph> {
     const live = await this.resolveConnection(connectionId);
+    const schema = options?.schema;
     const raw = await this.callTool<{
       nodes: { table: string; schema: string }[];
       edges: {
@@ -654,11 +661,36 @@ export class McpBackendClient implements BackendClient {
       }[];
     }>("get_schema_graph", schema ? { connectionId: live, schema } : { connectionId: live });
 
-    // Enrich each node with a few columns via describe_table (bounded concurrency).
+    const allEdges: SchemaGraphEdge[] = raw.edges.map((e) => ({
+      fromSchema: e.fromSchema,
+      fromTable: e.fromTable,
+      fromColumn: e.fromColumn,
+      toSchema: e.toSchema,
+      toTable: e.toTable,
+      toColumn: e.toColumn,
+    }));
+
+    // Depth-from-focus: choose the node set BEFORE describing, so a focused
+    // graph only describes the tables within `depth` FK-hops of the root
+    // (the edges come free from get_schema_graph). Without a root, keep all.
+    const rootKey = rootKeyOf(options);
+    const keep = rootKey ? reachableKeys(allEdges, rootKey, options?.depth ?? 1) : null;
+    const rawNodes = keep
+      ? raw.nodes.filter((n) => keep.has(graphKey(n.schema, n.table)))
+      : raw.nodes;
+    const edges = keep
+      ? allEdges.filter(
+          (e) =>
+            keep.has(graphKey(e.fromSchema, e.fromTable)) &&
+            keep.has(graphKey(e.toSchema, e.toTable))
+        )
+      : allEdges;
+
+    // Enrich the selected nodes with a few columns via describe_table (bounded concurrency).
     const nodes: SchemaGraph["nodes"] = [];
     const limit = 8;
-    for (let i = 0; i < raw.nodes.length; i += limit) {
-      const chunk = raw.nodes.slice(i, i + limit);
+    for (let i = 0; i < rawNodes.length; i += limit) {
+      const chunk = rawNodes.slice(i, i + limit);
       const described = await Promise.all(
         chunk.map((n) =>
           this.describeTable(connectionId, n.table, n.schema)
@@ -679,17 +711,7 @@ export class McpBackendClient implements BackendClient {
       });
     }
 
-    return {
-      nodes,
-      edges: raw.edges.map((e) => ({
-        fromSchema: e.fromSchema,
-        fromTable: e.fromTable,
-        fromColumn: e.fromColumn,
-        toSchema: e.toSchema,
-        toTable: e.toTable,
-        toColumn: e.toColumn,
-      })),
-    };
+    return { nodes, edges };
   }
 }
 

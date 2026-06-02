@@ -5,6 +5,7 @@ import type {
   Connection,
   GetRecordsParams,
   GetRelationCountsParams,
+  GetSchemaGraphOptions,
   GetTableStatsParams,
   IncomingForeignKey,
   PageRelationCounts,
@@ -19,6 +20,7 @@ import type {
   TableSummary,
 } from "./types";
 import type { BackendTransport } from "./transport";
+import { focusGraph } from "@/lib/graph";
 
 /**
  * BackendClient implementation that drives Beekeeper Studio's REAL backend over
@@ -499,7 +501,11 @@ export class ElectronBackendClient implements BackendClient {
     return { columns: [] };
   }
 
-  async getSchemaGraph(connectionId: string, schema?: string): Promise<SchemaGraph> {
+  async getSchemaGraph(
+    connectionId: string,
+    options?: GetSchemaGraphOptions
+  ): Promise<SchemaGraph> {
+    const schema = options?.schema;
     const nodes: SchemaGraph["nodes"] = [];
     const edges: SchemaGraph["edges"] = [];
     try {
@@ -545,6 +551,9 @@ export class ElectronBackendClient implements BackendClient {
     } catch {
       /* degrade to whatever nodes/edges were gathered before the failure */
     }
-    return { nodes, edges };
+    // TODO(perf): for a focused graph this still describes every table, then
+    // narrows. A large schema would benefit from an incremental describe-BFS
+    // from the root. The render is already depth-limited via focusGraph.
+    return focusGraph({ nodes, edges }, options);
   }
 }

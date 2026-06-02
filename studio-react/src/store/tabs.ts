@@ -59,6 +59,9 @@ export interface Tab {
   schema?: string;
   table?: string;
   connectionId?: string;
+  /** for graph tabs: focus the graph on this root table (depth-from-focus). */
+  rootTable?: string;
+  rootSchema?: string;
   /** for query tabs, persisted editor text */
   sql?: string;
   /**
@@ -91,7 +94,12 @@ interface TabsState {
   openTable: (connectionId: string, schema: string, table: string) => void;
   openQuery: () => void;
   openConnection: () => void;
-  openGraph: (connectionId: string, schema?: string) => void;
+  openGraph: (
+    connectionId: string,
+    schema?: string,
+    rootTable?: string,
+    rootSchema?: string
+  ) => void;
   /**
    * Open (or focus) a relationship drilldown tab. `parentPath` is the breadcrumb
    * leading up to this hop (empty for a first drilldown). `crumb` is the new hop.
@@ -290,10 +298,18 @@ export const useTabsStore = create<TabsState>((set, get) => ({
     set((s) => ({ tabs: [...s.tabs, tab], activeId: tab.id }));
   },
 
-  openGraph: (connectionId, schema) => {
-    const title = schema ? `Graph · ${schema}` : "Schema Graph";
+  openGraph: (connectionId, schema, rootTable, rootSchema) => {
+    const title = rootTable
+      ? `Graph · ${rootTable}`
+      : schema
+        ? `Graph · ${schema}`
+        : "Schema Graph";
     const existing = get().tabs.find(
-      (t) => t.kind === "graph" && t.connectionId === connectionId && t.schema === schema
+      (t) =>
+        t.kind === "graph" &&
+        t.connectionId === connectionId &&
+        t.schema === schema &&
+        t.rootTable === rootTable
     );
     if (existing) {
       set({ activeId: existing.id });
@@ -305,6 +321,8 @@ export const useTabsStore = create<TabsState>((set, get) => ({
       title,
       connectionId,
       schema,
+      rootTable,
+      rootSchema: rootTable ? (rootSchema ?? schema ?? "public") : undefined,
     };
     set((s) => ({ tabs: [...s.tabs, tab], activeId: tab.id }));
   },
