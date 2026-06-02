@@ -1,15 +1,24 @@
+import { useEffect } from "react";
 import { TitleBar } from "@/components/shell/TitleBar";
 import { MainContent } from "@/components/shell/MainContent";
 import { StatusBar } from "@/components/shell/StatusBar";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { ActivityPanel } from "@/components/activity/ActivityPanel";
 import { useSidebarStore } from "@/store/sidebar";
+import { useTabsStore } from "@/store/tabs";
 import { TooltipProvider, Toaster } from "@/ui";
 
 export default function App() {
   const collapsed = useSidebarStore((s) => s.collapsed);
   const width = useSidebarStore((s) => s.width);
   const setWidth = useSidebarStore((s) => s.setWidth);
+  const bootstrap = useTabsStore((s) => s.bootstrap);
+
+  // Resolve the real connection list on startup and open the first table.
+  // No connection id is hardcoded, so a fresh load works in mock AND MCP.
+  useEffect(() => {
+    void bootstrap();
+  }, [bootstrap]);
 
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault();

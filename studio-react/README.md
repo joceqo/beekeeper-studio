@@ -154,7 +154,11 @@ These screens now use the `src/ui` primitives instead of raw
   `IconButton`s + `Tooltip`s, Retry `Button`
 - **FilterBar** — column/operator `Select`s, value `Input`s, add/remove
   `Button`/`IconButton`s, count `Badge`
-- **DetailPanel** — close `IconButton`, visibility-toggle `Button`
+- **DetailPanel** — close `IconButton`, visibility-toggle `Button`, semantic-type
+  field icons (shared with the grid header, see Drilldown v2 below)
+- **DrilldownBreadcrumb** — branching breadcrumb built from `src/ui` `Chip`
+  (removable `×`), `Badge` (sibling count pill), `IconButton` + `Tooltip`
+  (back/forward); no raw chips or Radix
 - **ConnectionScreen** — engine `Tabs`, `Input` fields, AI-access
   `SegmentedControl`, Connect/Save `Button`s routing through `notify`
 - **QueryEditor** — Run `Button`, format `IconButton`, success/error `notify`
@@ -177,6 +181,34 @@ These screens now use the `src/ui` primitives instead of raw
   them); they are wired and available for upcoming work (settings, command
   palette, context menus, write-confirm dialogs).
 
+### Drilldown v2 + startup (recent work)
+
+- **Seeded-tab connection fix** — the demo tabs no longer hardcode a connection
+  id (`mlc-local`). On startup `useTabsStore.bootstrap()` resolves the real
+  connection list (`listConnections` → `connect` → `listTables`) and opens the
+  first table; the sidebar default `activeConnectionId` is `null` and resolves
+  the same way. A fresh load now works in BOTH the mock and `VITE_BACKEND=mcp`
+  with no "Unknown or disconnected connection" error. The QueryEditor also runs
+  against the sidebar's active connection instead of a hardcoded id.
+- **Semantic-type icons (§4)** — `semanticType(column, isFk, isRelation)` in
+  [`lib/relations.ts`](src/lib/relations.ts) follows SlashTable's exact
+  `pickSpriteName` priority (PK → FK → relation → semanticType → dataType
+  fallback → text). The Lucide map lives in
+  [`SemanticIcon.tsx`](src/components/grid/SemanticIcon.tsx) and the matching
+  Glide header sprites in
+  [`headerIcons.ts`](src/components/grid/headerIcons.ts); both share one mapping.
+- **Branching breadcrumb model (§3)** — relation tabs carry a `DrilldownNode`
+  tree (`tree` / `activeNodeId` / `history` / `historyIndex`) in
+  [`store/tabs.ts`](src/store/tabs.ts). Re-drilling from an existing tab adds a
+  BRANCH rather than opening a new tab.
+
+### TODO (deferred from the Drilldown v2 spec)
+
+- **§5 Schema-graph depth-from-focus** — defaulting the schema graph to depth 1
+  from a focused/pinned table (instead of all tables) and expanding neighbours on
+  demand, with `get_schema_graph(rootTable, depth)`. Left as a separate
+  follow-up per the spec; `SchemaGraphView` still renders the full graph.
+
 ## What's in the UI
 
 - **Title bar + tab strip** — table / query / connection tabs, active tab uses
@@ -186,18 +218,27 @@ These screens now use the `src/ui` primitives instead of raw
   icon rail.
 - **Data grid** — Glide canvas grid with ~50+ mock rows for `public.users`
   (id / email / username / …), smooth scrolling, NULL styling, typed cells.
-- **Relationship drilldown** (SlashTable's #1 differentiator) — related tables
-  appear as virtual **relation columns** after the real data columns, one per
-  outgoing FK (parent, `N:1`) and one per incoming FK (children, `1:N`),
-  rendered as info-coloured chips (e.g. `▸ campaigns (1:N)`) with a child-row
-  **count** badge when the backend exposes `get_relation_counts`. Clicking a
-  relation chip opens a new **drilldown tab** showing the related rows filtered
-  to that relationship (`SELECT … WHERE fk = <pk>` for children, `pk = <fk>` for
-  parents, via a read-only `executeQuery`), with a clickable **breadcrumb** of
-  the path (`users[42] › campaigns(owner_id)`). Drilldown nests arbitrarily deep
-  and back-navigates by clicking any crumb. FK values in the detail panel follow
-  the same drilldown. Mock topology: `campaigns.owner_id → users.id`,
-  `events.user_id → users.id`, `reports.campaign_id → campaigns.id`.
+- **Relationship drilldown v2** (SlashTable's #1 differentiator) — related
+  tables appear as first-class **relation columns** after the real data columns,
+  one per outgoing FK (parent, `N:1`) and one per incoming FK (children, `1:N`),
+  each with a `↗` header icon. Each relation cell shows the **per-row count**
+  for THAT row — `order_items (3)` in the accent color, dimmed `shipments (0)`.
+  Counts are fetched for the **whole visible page** with one grouped query per
+  relation (`SELECT fk, count(*) … WHERE fk IN (<page pks>) GROUP BY fk`, via
+  `getPageRelationCounts`) and cached per (table, page) — cheap, not one call
+  per row. A column that **is a foreign key** renders its value as an
+  accent-coloured link with a trailing `→`; clicking it drills into the parent
+  row (`N:1`). Clicking a relation cell drills into the children (`1:N`). Both
+  open/extend a **branching breadcrumb**: the breadcrumb is a TREE, not a linear
+  path — from any node you can follow multiple relations, creating sibling
+  branches. Each node is a removable chip (`×`); the active node is
+  accent-coloured; record-pinned nodes show `#<id>`; **back/forward** arrows walk
+  the activation history; clicking a chip activates it; inactive sibling branches
+  collapse behind a count pill that expands to switch branches. Each step seeds
+  its join condition (`fk = value` / `pk = value`) into the linked FilterBar via
+  `lib/filters`, so the join filter is visible and editable. Mock topology:
+  `campaigns.owner_id → users.id`, `events.user_id → users.id`,
+  `reports.campaign_id → campaigns.id`.
 - **Nested AND/OR filters** — a collapsible **FilterBar** above the grid (a
   "Filter" chip with an active-condition count badge + Clear). It edits a per-tab
   **filter tree**: groups carry an `AND·OR` toggle and a `NOT` negate, and hold

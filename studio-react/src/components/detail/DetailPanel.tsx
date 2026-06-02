@@ -1,6 +1,8 @@
 import { useMemo } from "react";
-import { KeyRound, Link2, Eye, EyeOff, X } from "lucide-react";
+import { Link2, Eye, EyeOff, X } from "lucide-react";
 import type { CellValue, ColumnDef, TableDescription } from "@/ipc";
+import { semanticType } from "@/lib/relations";
+import { SemanticIcon } from "@/components/grid/SemanticIcon";
 import { useTabsStore, type DrilldownCrumb } from "@/store/tabs";
 import {
   useColumnConfigStore,
@@ -167,8 +169,7 @@ function RowDetail({
               className="flex flex-col gap-0.5 border-b border-border/60 px-3 py-2"
             >
               <dt className="flex items-center gap-1.5">
-                {c.primaryKey && <KeyRound size={11} className="text-warning" />}
-                {ref && <Link2 size={11} className="text-info" />}
+                <SemanticIcon type={semanticType(c, !!ref)} />
                 <span className="font-mono text-xs text-text-secondary">{c.name}</span>
                 <span className="ml-auto font-mono text-[10px] text-text-muted">{c.dataType}</span>
               </dt>
@@ -244,8 +245,7 @@ function ColumnDetail({
     <div className="flex flex-col gap-3 p-3">
       <div>
         <div className="flex items-center gap-1.5">
-          {column?.primaryKey && <KeyRound size={12} className="text-warning" />}
-          {fkRef && <Link2 size={12} className="text-info" />}
+          {column && <SemanticIcon type={semanticType(column, !!fkRef)} size={12} />}
           <span className="font-mono text-md text-text-primary">{columnName}</span>
         </div>
         <div className="mt-0.5 font-mono text-xs text-text-muted">

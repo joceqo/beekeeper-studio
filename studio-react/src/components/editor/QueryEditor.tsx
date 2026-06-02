@@ -4,6 +4,7 @@ import { Play, Loader2, ListTree } from "lucide-react";
 import { backend, type QueryResult } from "@/ipc";
 import { DataGrid } from "@/components/grid/DataGrid";
 import { useTabsStore } from "@/store/tabs";
+import { useSidebarStore } from "@/store/sidebar";
 import { useThemeStore } from "@/store/theme";
 import { useActivityStore } from "@/store/activity";
 import { Button, IconButton, Tooltip, notify } from "@/ui";
@@ -18,6 +19,9 @@ export function QueryEditor({ tabId, sql }: Props) {
   const theme = useThemeStore((s) => s.theme);
   const updateSql = useTabsStore((s) => s.updateSql);
   const pushActivity = useActivityStore((s) => s.push);
+  // Run against the sidebar's active connection (resolved to a live id). No
+  // hardcoded connection id, so the query editor works in mock AND MCP.
+  const activeConnectionId = useSidebarStore((s) => s.activeConnectionId);
 
   const [result, setResult] = useState<QueryResult | null>(null);
   const [running, setRunning] = useState(false);
@@ -70,15 +74,20 @@ export function QueryEditor({ tabId, sql }: Props) {
   }, [monaco, theme]);
 
   const run = async () => {
+    if (!activeConnectionId) {
+      notify.error("No connection selected. Pick a connection in the sidebar.");
+      return;
+    }
     setRunning(true);
     try {
-      const r = await backend.executeQuery("mlc-local", sqlRef.current);
+      const liveId = await backend.connect(activeConnectionId);
+      const r = await backend.executeQuery(liveId, sqlRef.current);
       setResult(r);
       notify.success(`${r.rowCount} rows · ${(r.elapsedMs / 1000).toFixed(2)}s`);
       pushActivity({
         category: "SQL",
         op: r.operation,
-        connection: "mlc local",
+        connection: activeConnectionId.replace(/[-:]/g, " "),
         tables: r.tables.join(", "),
         sql: sqlRef.current.replace(/\s+/g, " ").trim(),
         durationMs: r.elapsedMs,

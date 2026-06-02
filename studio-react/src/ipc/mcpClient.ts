@@ -5,6 +5,8 @@ import type {
   Connection,
   GetRecordsParams,
   GetRelationCountsParams,
+  PageRelationCounts,
+  PageRelationCountsParams,
   QueryResult,
   RecordPage,
   RelationCount,
@@ -389,6 +391,52 @@ export class McpBackendClient implements BackendClient {
         }));
     } catch {
       return [];
+    }
+  }
+
+  async getPageRelationCounts(
+    params: PageRelationCountsParams
+  ): Promise<PageRelationCounts> {
+    const out: PageRelationCounts = {};
+    if (!params.rowKeys.length || !params.relations.length) return out;
+    try {
+      const live = await this.resolveConnection(params.connectionId);
+      const ident = (s: string) => `"${s.replace(/"/g, '""')}"`;
+      const lit = (v: CellValue) => {
+        if (v === null) return "NULL";
+        if (typeof v === "number") return String(v);
+        if (typeof v === "boolean") return v ? "TRUE" : "FALSE";
+        return `'${String(v).replace(/'/g, "''")}'`;
+      };
+      const inList = params.rowKeys.map(lit).join(", ");
+      // One grouped query per relation: SELECT fk, count(*) ... WHERE fk IN (...) GROUP BY fk
+      await Promise.all(
+        params.relations.map(async (rel) => {
+          const qualified = rel.schema
+            ? `${ident(rel.schema)}.${ident(rel.table)}`
+            : ident(rel.table);
+          const col = ident(rel.fromColumn);
+          const sql = `SELECT ${col} AS fk, count(*) AS n FROM ${qualified} WHERE ${col} IN (${inList}) GROUP BY ${col}`;
+          try {
+            const results = await this.callTool<
+              { rows: Record<string, CellValue>[] }[]
+            >("execute_query", { connectionId: live, sql });
+            const rows = results?.[0]?.rows ?? [];
+            const byKey: Record<string, number> = {};
+            for (const r of rows) {
+              const k = r.fk;
+              if (k === null || k === undefined) continue;
+              byKey[String(k)] = Number(r.n) || 0;
+            }
+            out[rel.id] = byKey;
+          } catch {
+            out[rel.id] = {};
+          }
+        })
+      );
+      return out;
+    } catch {
+      return out;
     }
   }
 

@@ -86,6 +86,37 @@ export interface GetRelationCountsParams {
   rowKey: CellValue;
 }
 
+/**
+ * Per-page, per-relation row counts: for one incoming relation (a child table),
+ * how many child rows reference each of the page's PK values. Fetched with a
+ * single grouped query per relation so the whole visible page is cheap.
+ */
+export interface PageRelationCountsParams {
+  connectionId: string;
+  /** The parent table whose page we're counting children for. */
+  schema?: string;
+  /** The referenced column on the parent (usually its PK). */
+  toColumn: string;
+  /** The page's `toColumn` values (the visible rows' PKs). */
+  rowKeys: CellValue[];
+  /** Incoming relations to count, each a child table + its FK column. */
+  relations: {
+    /** Stable relation id (matches RelationColumn.id) to key results by. */
+    id: string;
+    schema?: string;
+    /** Child table. */
+    table: string;
+    /** Child FK column referencing the parent's `toColumn`. */
+    fromColumn: string;
+  }[];
+}
+
+/**
+ * Result of {@link BackendClient.getPageRelationCounts}: for each relation id,
+ * a map of parent-PK-value (stringified) -> child count. Missing keys mean 0.
+ */
+export type PageRelationCounts = Record<string, Record<string, number>>;
+
 export type CellValue = string | number | boolean | null;
 
 export interface RecordPage {
@@ -182,4 +213,11 @@ export interface BackendClient {
    * gracefully to count-less chips.
    */
   getRelationCounts(params: GetRelationCountsParams): Promise<RelationCount[]>;
+  /**
+   * Per-page child counts for a set of incoming relations, computed with one
+   * grouped query per relation (`SELECT fk, count(*) ... WHERE fk IN (...) GROUP
+   * BY fk`) so the whole visible page is cheap. Best-effort: resolves to `{}` on
+   * error so the grid degrades to count-less chips.
+   */
+  getPageRelationCounts(params: PageRelationCountsParams): Promise<PageRelationCounts>;
 }

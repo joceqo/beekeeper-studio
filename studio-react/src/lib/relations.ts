@@ -30,6 +30,92 @@ export interface RelationColumn {
   cardinality: "N:1" | "1:N";
 }
 
+/**
+ * Semantic type of a column, used to pick a header/detail icon (§4). Mirrors
+ * SlashTable's `pickSpriteName` exactly: a priority order of
+ * PK → FK → relation → semanticType switch → dataType fallback → text default.
+ */
+export type SemanticType =
+  | "pk"
+  | "fk"
+  | "relation"
+  | "bool"
+  | "cidr"
+  | "code"
+  | "color"
+  | "currency"
+  | "date_relative"
+  | "email"
+  | "image_url"
+  | "json"
+  | "number"
+  | "percentage"
+  | "phone"
+  | "rating"
+  | "url"
+  | "text";
+
+/**
+ * Classify a column into a {@link SemanticType}, following SlashTable's exact
+ * priority order. `isFk`/`isRelation` are supplied by the caller (the bare
+ * ColumnDef doesn't carry FK/relation membership). `hint` is an optional
+ * pre-derived semantic-type string (SlashTable's `column.semanticType`); when
+ * absent we fall back to a dataType-based classification.
+ */
+export function semanticType(
+  column: { name: string; dataType: string; primaryKey?: boolean; semanticType?: string },
+  isFk = false,
+  isRelation = false
+): SemanticType {
+  // 1. PK → FK → relation take precedence over everything else.
+  if (column.primaryKey) return "pk";
+  if (isFk) return "fk";
+  if (isRelation) return "relation";
+
+  // 2. Explicit semanticType switch (matches SlashTable's known set).
+  switch (column.semanticType) {
+    case "bool":
+      return "bool";
+    case "cidr":
+    case "ip_address":
+      return "cidr";
+    case "code":
+      return "code";
+    case "color":
+      return "color";
+    case "currency":
+      return "currency";
+    case "date_relative":
+      return "date_relative";
+    case "email":
+      return "email";
+    case "image_url":
+      return "image_url";
+    case "json":
+      return "json";
+    case "number":
+      return "number";
+    case "percentage":
+      return "percentage";
+    case "phone":
+      return "phone";
+    case "rating":
+      return "rating";
+    case "url":
+      return "url";
+  }
+
+  // 3. dataType fallback (lowercased).
+  const t = column.dataType.toLowerCase();
+  if (/(int|serial|numeric|decimal|float|double|real|money)/.test(t)) return "number";
+  if (t.includes("bool")) return "bool";
+  if (t.includes("json")) return "json";
+  if (/(date|time|timestamp)/.test(t)) return "date_relative";
+
+  // 4. text/unknown default.
+  return "text";
+}
+
 /** Parse a Beekeeper FK reference string like `public.users(id)`. */
 export function parseRef(
   ref: string

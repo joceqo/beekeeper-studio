@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { backend, type CellValue, type ColumnDef } from "@/ipc";
-import { relationCountKey, type RelationColumn } from "@/lib/relations";
+import type { RelationColumn } from "@/lib/relations";
 
 /**
- * Lazily fetch related-row counts for relation chips. Counts are best-effort
- * (the backend tool may be unavailable, in which case `getRelationCounts`
- * resolves to `[]` and chips simply render without a number).
+ * Fetch incoming-relation child counts for the WHOLE visible page (§1), not just
+ * the selected row. To stay cheap, counts are computed with a single grouped
+ * query per relation (`SELECT fk, count(*) ... WHERE fk IN (<page pks>) GROUP BY
+ * fk`) via {@link backend.getPageRelationCounts}, then projected onto each row by
+ * its primary-key value. Results are cached per (table, page-signature).
  *
- * To stay cheap, counts are fetched per *row key* on demand — currently for the
- * selected row — and cached by `${table}::${pkValue}`. The returned map is the
- * `rowIndex -> (relationId -> count)` shape the grid consumes.
+ * Best-effort: on backend error the map is empty and chips render without a
+ * number. The returned shape is `rowIndex -> (relationId -> count)`, which the
+ * grid consumes directly.
  */
 export function useRelationCounts(args: {
   connectionId: string;
@@ -18,13 +20,18 @@ export function useRelationCounts(args: {
   columns: ColumnDef[];
   rows: CellValue[][];
   relations: RelationColumn[];
-  /** Page-relative row indices to fetch counts for (e.g. the selected row). */
-  rowIndices: number[];
+  /**
+   * A signature that changes when the page changes (offset/filter/sort), so the
+   * cache key is stable within a page but refetches across pages.
+   */
+  pageKey: string;
 }): Map<number, Map<string, number>> {
-  const { connectionId, schema, table, columns, rows, relations, rowIndices } = args;
+  const { connectionId, schema, table, columns, rows, relations, pageKey } = args;
 
-  // cacheKey -> (relationId -> count)
-  const [cache, setCache] = useState<Map<string, Map<string, number>>>(new Map());
+  // cacheKey -> (relationId -> (pkValue -> count))
+  const [cache, setCache] = useState<
+    Map<string, Record<string, Record<string, number>>>
+  >(new Map());
   const inFlight = useRef<Set<string>>(new Set());
 
   const pkIndex = useMemo(() => {
@@ -32,7 +39,28 @@ export function useRelationCounts(args: {
     return i >= 0 ? i : 0;
   }, [columns]);
 
-  const hasIncoming = relations.some((r) => r.direction === "incoming");
+  // Only incoming (1:N) relations carry per-row counts.
+  const incoming = useMemo(
+    () => relations.filter((r) => r.direction === "incoming"),
+    [relations]
+  );
+
+  // The page's PK values (deduped, non-null), used for the IN (...) list.
+  const rowKeys = useMemo(() => {
+    const set = new Set<string>();
+    const out: CellValue[] = [];
+    for (const row of rows) {
+      const v = row[pkIndex];
+      if (v === null || v === undefined) continue;
+      const s = String(v);
+      if (set.has(s)) continue;
+      set.add(s);
+      out.push(v);
+    }
+    return out;
+  }, [rows, pkIndex]);
+
+  const cacheKey = `${schema}.${table}::${pageKey}`;
 
   // Reset cache when the underlying table/connection changes.
   useEffect(() => {
@@ -40,51 +68,56 @@ export function useRelationCounts(args: {
     inFlight.current = new Set();
   }, [connectionId, schema, table]);
 
-  const wantedKeys = rowIndices
-    .map((i) => rows[i]?.[pkIndex])
-    .filter((v): v is CellValue => v !== undefined && v !== null)
-    .map((v) => String(v));
-
   useEffect(() => {
-    if (!hasIncoming) return;
-    for (const idx of rowIndices) {
-      const pk = rows[idx]?.[pkIndex];
-      if (pk === undefined || pk === null) continue;
-      const cacheKey = `${schema}.${table}::${String(pk)}`;
-      if (cache.has(cacheKey) || inFlight.current.has(cacheKey)) continue;
-      inFlight.current.add(cacheKey);
-      backend
-        .getRelationCounts({ connectionId, table, schema, rowKey: pk })
-        .then((counts) => {
-          const byRel = new Map<string, number>();
-          for (const c of counts) byRel.set(relationCountKey(c), c.count);
-          setCache((prev) => {
-            const next = new Map(prev);
-            next.set(cacheKey, byRel);
-            return next;
-          });
-        })
-        .catch(() => {
-          setCache((prev) => {
-            const next = new Map(prev);
-            next.set(cacheKey, new Map());
-            return next;
-          });
-        })
-        .finally(() => inFlight.current.delete(cacheKey));
-    }
+    if (incoming.length === 0 || rowKeys.length === 0) return;
+    if (cache.has(cacheKey) || inFlight.current.has(cacheKey)) return;
+    inFlight.current.add(cacheKey);
+    backend
+      .getPageRelationCounts({
+        connectionId,
+        schema,
+        toColumn: columns[pkIndex]?.name ?? "id",
+        rowKeys,
+        relations: incoming.map((r) => ({
+          id: r.id,
+          schema: r.targetSchema,
+          table: r.targetTable,
+          fromColumn: r.targetColumn,
+        })),
+      })
+      .then((result) => {
+        setCache((prev) => {
+          const next = new Map(prev);
+          next.set(cacheKey, result);
+          return next;
+        });
+      })
+      .catch(() => {
+        setCache((prev) => {
+          const next = new Map(prev);
+          next.set(cacheKey, {});
+          return next;
+        });
+      })
+      .finally(() => inFlight.current.delete(cacheKey));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connectionId, schema, table, hasIncoming, pkIndex, wantedKeys.join(",")]);
+  }, [connectionId, schema, table, cacheKey, incoming, rowKeys.length, pkIndex]);
 
-  // Project the cache onto page-relative row indices for the grid.
+  // Project page counts onto each row index by its PK value.
   return useMemo(() => {
     const out = new Map<number, Map<string, number>>();
-    for (const idx of rowIndices) {
-      const pk = rows[idx]?.[pkIndex];
-      if (pk === undefined || pk === null) continue;
-      const byRel = cache.get(`${schema}.${table}::${String(pk)}`);
-      if (byRel) out.set(idx, byRel);
-    }
+    const byRel = cache.get(cacheKey);
+    if (!byRel) return out;
+    rows.forEach((row, idx) => {
+      const pk = row[pkIndex];
+      if (pk === null || pk === undefined) return;
+      const key = String(pk);
+      const m = new Map<string, number>();
+      for (const r of incoming) {
+        m.set(r.id, byRel[r.id]?.[key] ?? 0);
+      }
+      out.set(idx, m);
+    });
     return out;
-  }, [cache, rowIndices, rows, pkIndex, schema, table]);
+  }, [cache, cacheKey, rows, pkIndex, incoming]);
 }

@@ -2,10 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   RefreshCw,
   AlertTriangle,
-  ChevronRight,
   PanelRightOpen,
   PanelRightClose,
 } from "lucide-react";
+import { DrilldownBreadcrumb } from "./DrilldownBreadcrumb";
 import {
   backend,
   type CellValue,
@@ -27,6 +27,7 @@ import {
   localValue,
   buildCrumb,
   drilldownSql,
+  parseRef,
   type RelationColumn,
 } from "@/lib/relations";
 import { useRelationCounts } from "./useRelationCounts";
@@ -59,7 +60,10 @@ export function RelationView({ tabId, connectionId, path }: Props) {
   const pushActivity = useActivityStore((s) => s.push);
   const setStatus = useStatusStore((s) => s.set);
   const openRelation = useTabsStore((s) => s.openRelation);
-  const navigateCrumb = useTabsStore((s) => s.navigateCrumb);
+
+  // The branching breadcrumb tree (§3) lives on the tab.
+  const tab = useTabsStore((s) => s.tabs.find((t) => t.id === tabId));
+  const seedEquals = useFilterStore((s) => s.seedEquals);
 
   const selection = useSelectionStore((s) => s.byTab[tabId]) ?? {
     rowIndex: null,
@@ -74,11 +78,28 @@ export function RelationView({ tabId, connectionId, path }: Props) {
   const dockWidth = useDetailDockStore((s) => s.width);
   const setDockWidth = useDetailDockStore((s) => s.setWidth);
 
-  // Compose the drilldown's pinned `fk = value` condition with the FilterBar's
-  // compiled WHERE so the same filter engine refines a drilldown.
+  // Each drilldown step seeds its join condition (fk=value / pk=value) into the
+  // linked FilterBar (§3), so the join filter is visible and editable. Seeded
+  // once per tab (seedEquals is a no-op if a tree already exists).
+  useEffect(() => {
+    if (crumb.filterColumn != null && crumb.filterValue !== undefined) {
+      seedEquals(tabId, crumb.filterColumn, crumb.filterValue);
+    }
+  }, [tabId, crumb.filterColumn, crumb.filterValue, seedEquals]);
+
+  // The FilterBar's compiled WHERE drives the drilldown. Since the join pin is
+  // seeded into the FilterBar, `where` already contains it; use `where` alone
+  // when present and fall back to the crumb's own pin when the user clears the
+  // filter (keeps the drilldown scoped either way, no duplicated condition).
   const filterRoot = useFilterStore((s) => s.byTab[tabId]);
   const where = useMemo(() => compileWhere(filterRoot ?? null), [filterRoot]);
-  const sql = useMemo(() => drilldownSql(crumb, where), [crumb, where]);
+  const sql = useMemo(() => {
+    if (where) {
+      const qualified = `"${schema.replace(/"/g, '""')}"."${table.replace(/"/g, '""')}"`;
+      return `SELECT * FROM ${qualified} WHERE ${where} LIMIT 200`;
+    }
+    return drilldownSql(crumb);
+  }, [crumb, where, schema, table]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -120,10 +141,8 @@ export function RelationView({ tabId, connectionId, path }: Props) {
     [description]
   );
 
-  const countRowIndices = useMemo(
-    () => (selection.rowIndex != null ? [selection.rowIndex] : []),
-    [selection.rowIndex]
-  );
+  // Page-level relation counts for the drilldown's rows (one grouped query per
+  // relation). The page key is the drilldown SQL itself.
   const relationCounts = useRelationCounts({
     connectionId,
     schema,
@@ -131,7 +150,7 @@ export function RelationView({ tabId, connectionId, path }: Props) {
     columns,
     rows,
     relations,
-    rowIndices: countRowIndices,
+    pageKey: sql,
   });
 
   // Continue drilling: append a new crumb to this tab's path.
@@ -145,6 +164,28 @@ export function RelationView({ tabId, connectionId, path }: Props) {
       openRelation(connectionId, path, next);
     },
     [rows, columns, table, connectionId, path, openRelation]
+  );
+
+  // Follow an FK value as an orange link (§2) from within a drilldown: branch
+  // into the parent row (N:1), extending this tab's breadcrumb tree.
+  const onFkClick = useCallback(
+    (_rowIndex: number, column: ColumnDef, value: CellValue) => {
+      const ref = description?.foreignKeys.find((k) => k.column === column.name);
+      if (!ref) return;
+      const parsed = parseRef(ref.references);
+      if (!parsed) return;
+      const crumb: DrilldownCrumb = {
+        schema: parsed.schema ?? schema,
+        table: parsed.table,
+        filterColumn: parsed.column,
+        filterValue: value as string | number,
+        relation: "outgoing",
+        sourceKey: value as string | number,
+        sourceTable: table,
+      };
+      openRelation(connectionId, path, crumb);
+    },
+    [description, schema, table, connectionId, path, openRelation]
   );
 
   const startResize = (e: React.MouseEvent) => {
@@ -165,35 +206,17 @@ export function RelationView({ tabId, connectionId, path }: Props) {
 
   return (
     <div className="flex h-full flex-col">
-      {/* Breadcrumb of the drilldown path. */}
+      {/* Branching breadcrumb of the drilldown tree (§3). */}
       <div className="flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-b border-border bg-bg-secondary px-2">
-        {path.map((c, i) => {
-          const isLast = i === path.length - 1;
-          const label =
-            i === 0
-              ? c.sourceKey != null
-                ? `${c.table}[${c.sourceKey}]`
-                : c.table
-              : `${c.table}${c.filterColumn ? `(${c.filterColumn})` : ""}`;
-          return (
-            <span key={i} className="flex items-center gap-1">
-              {i > 0 && <ChevronRight size={12} className="text-text-muted" />}
-              <button
-                className={
-                  "rounded-sm px-1.5 py-0.5 font-mono text-xs " +
-                  (isLast
-                    ? "text-text-primary"
-                    : "text-info hover:bg-bg-hover hover:underline")
-                }
-                disabled={isLast}
-                onClick={() => navigateCrumb(tabId, i)}
-                title={isLast ? "Current" : "Back to this step"}
-              >
-                {label}
-              </button>
-            </span>
-          );
-        })}
+        {tab?.tree && (
+          <DrilldownBreadcrumb
+            tabId={tabId}
+            tree={tab.tree}
+            activeNodeId={tab.activeNodeId ?? null}
+            canBack={(tab.historyIndex ?? 0) > 0}
+            canForward={(tab.historyIndex ?? 0) < (tab.history?.length ?? 1) - 1}
+          />
+        )}
 
         <div className="ml-auto flex items-center gap-2">
           <Tooltip content="Refresh">
@@ -244,6 +267,8 @@ export function RelationView({ tabId, connectionId, path }: Props) {
               relations={relations}
               relationCounts={relationCounts}
               onRelationClick={onRelationClick}
+              description={description}
+              onFkClick={onFkClick}
             />
           )}
         </div>

@@ -5,6 +5,8 @@ import type {
   GetRecordsParams,
   GetRelationCountsParams,
   IncomingForeignKey,
+  PageRelationCounts,
+  PageRelationCountsParams,
   QueryResult,
   RecordPage,
   RelationCount,
@@ -293,6 +295,29 @@ export class MockBackendClient implements BackendClient {
       const wobble = (key * 31 + fk.fromTable.length) % 4;
       return { ...fk, count: Math.max(0, base + wobble - 1) };
     });
+  }
+
+  async getPageRelationCounts(
+    params: PageRelationCountsParams
+  ): Promise<PageRelationCounts> {
+    await delay(jitter(40, 140));
+    const out: PageRelationCounts = {};
+    const wanted = new Set(params.rowKeys.map((k) => String(k)));
+    for (const rel of params.relations) {
+      const meta = GENERIC_FK_COLUMNS[rel.table];
+      const child = MOCK_TABLES.find((t) => t.name === rel.table);
+      const byKey: Record<string, number> = {};
+      if (meta && child) {
+        // Exact grouped count: scan the child's deterministic FK values.
+        for (let i = 0; i < child.rowEstimate; i++) {
+          const fk = String(fkValueFor(rel.table, i));
+          if (!wanted.has(fk)) continue;
+          byKey[fk] = (byKey[fk] ?? 0) + 1;
+        }
+      }
+      out[rel.id] = byKey;
+    }
+    return out;
   }
 
   async getRecords(params: GetRecordsParams): Promise<RecordPage> {

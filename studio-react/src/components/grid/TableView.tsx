@@ -24,8 +24,10 @@ import {
   relationColumns,
   localValue,
   buildCrumb,
+  parseRef,
   type RelationColumn,
 } from "@/lib/relations";
+import type { CellValue, ColumnDef } from "@/ipc";
 import { useRelationCounts } from "./useRelationCounts";
 import { IconButton, Button, Tooltip } from "@/ui";
 
@@ -159,10 +161,11 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
   const selectedRow =
     page && selection.rowIndex != null ? page.rows[selection.rowIndex] ?? null : null;
 
-  // Fetch relation chip counts for the selected row (best-effort, cached).
-  const countRowIndices = useMemo(
-    () => (selection.rowIndex != null ? [selection.rowIndex] : []),
-    [selection.rowIndex]
+  // Fetch relation chip counts for the WHOLE visible page (best-effort, cached
+  // per page via a single grouped query per relation).
+  const pageKey = useMemo(
+    () => `o${offset}|w${where}|s${sort ? `${sort.column}:${sort.direction}` : ""}`,
+    [offset, where, sort]
   );
   const relationCounts = useRelationCounts({
     connectionId,
@@ -171,7 +174,7 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
     columns: page?.columns ?? [],
     rows: page?.rows ?? [],
     relations,
-    rowIndices: countRowIndices,
+    pageKey,
   });
 
   // Drill into related rows: open a new relation tab with a breadcrumb path.
@@ -195,6 +198,38 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
       openRelation(connectionId, [origin], crumb);
     },
     [page, table, schema, connectionId, openRelation]
+  );
+
+  // Follow an FK value as an orange link (§2): drill into the parent row (N:1),
+  // referenced table filtered to PK = value.
+  const onFkClick = useCallback(
+    (rowIndex: number, column: ColumnDef, value: CellValue) => {
+      if (!page) return;
+      const ref = description?.foreignKeys.find((k) => k.column === column.name);
+      if (!ref) return;
+      const parsed = parseRef(ref.references);
+      if (!parsed) return;
+      const row = page.rows[rowIndex];
+      const pkIdx = page.columns.findIndex((c) => c.primaryKey);
+      const originKey = row && pkIdx >= 0 ? row[pkIdx] : value;
+      const origin: DrilldownCrumb = {
+        schema,
+        table,
+        sourceKey: originKey as string | number,
+        sourceTable: table,
+      };
+      const crumb: DrilldownCrumb = {
+        schema: parsed.schema ?? schema,
+        table: parsed.table,
+        filterColumn: parsed.column,
+        filterValue: value as string | number,
+        relation: "outgoing",
+        sourceKey: value as string | number,
+        sourceTable: table,
+      };
+      openRelation(connectionId, [origin], crumb);
+    },
+    [page, description, schema, table, connectionId, openRelation]
   );
 
   return (
@@ -281,6 +316,8 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
               relations={relations}
               relationCounts={relationCounts}
               onRelationClick={onRelationClick}
+              description={description}
+              onFkClick={onFkClick}
             />
           ) : null}
         </div>

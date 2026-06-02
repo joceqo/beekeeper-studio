@@ -8,10 +8,16 @@ import DataEditor, {
   Theme,
 } from "@glideapps/glide-data-grid";
 import "@glideapps/glide-data-grid/dist/index.css";
-import type { CellValue, ColumnDef } from "@/ipc";
-import type { RelationColumn } from "@/lib/relations";
+import type { CellValue, ColumnDef, TableDescription } from "@/ipc";
+import {
+  parseRef,
+  semanticType,
+  type RelationColumn,
+  type SemanticType,
+} from "@/lib/relations";
 import { useThemeStore } from "@/store/theme";
 import { useColumnConfigStore, formatCellValue } from "@/store/columnConfig";
+import { HEADER_ICONS, headerIconKey } from "./headerIcons";
 
 /** Read a CSS custom property off the document root. */
 function token(name: string): string {
@@ -26,8 +32,8 @@ function glideTheme(): Partial<Theme> {
     textMedium: token("--color-text-secondary"),
     textLight: token("--color-text-muted"),
     textBubble: token("--color-text-primary"),
-    bgIconHeader: token("--color-text-muted"),
-    fgIconHeader: token("--color-bg-primary"),
+    bgIconHeader: token("--color-bg-secondary"),
+    fgIconHeader: token("--color-text-muted"),
     textHeader: token("--color-text-secondary"),
     textHeaderSelected: token("--color-text-on-accent"),
     bgCell: token("--color-bg-primary"),
@@ -41,7 +47,7 @@ function glideTheme(): Partial<Theme> {
     borderColor: token("--color-border"),
     horizontalBorderColor: token("--color-border"),
     drilldownBorder: token("--color-border"),
-    linkColor: token("--color-info"),
+    linkColor: token("--color-accent"),
     cellHorizontalPadding: 10,
     cellVerticalPadding: 5,
     headerFontStyle: "600 12px",
@@ -107,8 +113,12 @@ export interface DataGridProps {
   relations?: RelationColumn[];
   /** Per-row, per-relation child counts: rowIndex -> (relationId -> count). */
   relationCounts?: Map<number, Map<string, number>>;
-  /** Fired when a relation chip is clicked, to drill into related rows. */
+  /** Fired when a relation cell is clicked, to drill into related rows. */
   onRelationClick?: (rowIndex: number, relation: RelationColumn) => void;
+  /** describeTable result, for FK detection + semantic-type header icons (§4). */
+  description?: TableDescription | null;
+  /** Fired when an FK cell's value is clicked (§2), to drill into the parent row. */
+  onFkClick?: (rowIndex: number, column: ColumnDef, value: CellValue) => void;
 }
 
 const REL_COL_PREFIX = "__rel__:";
@@ -124,6 +134,8 @@ export function DataGrid({
   relations = [],
   relationCounts,
   onRelationClick,
+  description,
+  onFkClick,
 }: DataGridProps) {
   // re-derive theme when app theme flips
   const theme = useThemeStore((s) => s.theme);
@@ -136,6 +148,17 @@ export function DataGrid({
     [configByKey, tabId]
   );
 
+  // FK map: column name -> parsed reference. Drives FK links (§2) + the FK
+  // semantic type for header icons (§4).
+  const fkByColumn = useMemo(() => {
+    const m = new Map<string, { schema?: string; table: string; column: string }>();
+    for (const fk of description?.foreignKeys ?? []) {
+      const ref = parseRef(fk.references);
+      if (ref) m.set(fk.column, ref);
+    }
+    return m;
+  }, [description]);
+
   // Visible columns map to original indices, so cell lookups stay correct.
   const visible = useMemo(
     () =>
@@ -145,51 +168,59 @@ export function DataGrid({
     [columns, columnConfig]
   );
 
+  const semanticOf = useCallback(
+    (c: ColumnDef): SemanticType => semanticType(c, fkByColumn.has(c.name)),
+    [fkByColumn]
+  );
+
   const gridColumns = useMemo<GridColumn[]>(() => {
     const dataCols: GridColumn[] = visible.map(({ c }) => {
       const arrow = sort?.column === c.name ? (sort.direction === "asc" ? " ↑" : " ↓") : "";
+      const sem = semanticOf(c);
       return {
         title: c.name + arrow,
         id: c.name,
         width: colWidth(c),
-        icon: c.primaryKey ? "headerRowID" : undefined,
+        // Custom header icon by semantic type (§4); FK uses the accent color.
+        icon: headerIconKey(sem),
+        themeOverride: sem === "fk" ? { fgIconHeader: token("--color-accent") } : undefined,
       };
     });
-    // Relation columns are appended after the real data columns and visually
-    // tagged with their cardinality (N:1 / 1:N) + a group, so they read as
-    // navigation affordances rather than data.
+    // Relation columns are appended after the real data columns with a ↗ header
+    // icon, so they read as navigation affordances rather than data.
     const relCols: GridColumn[] = relations.map((r) => ({
-      title: `${r.cardinality === "1:N" ? "▸ " : "▴ "}${r.targetTable} (${r.cardinality})`,
+      title: r.targetTable,
       id: REL_COL_PREFIX + r.id,
-      width: 160,
+      width: 170,
+      icon: headerIconKey("relation"),
       themeOverride: {
-        textHeader: token("--color-info"),
+        textHeader: token("--color-text-muted"),
         bgHeader: token("--color-bg-surface"),
+        fgIconHeader: token("--color-accent"),
       },
     }));
     return [...dataCols, ...relCols];
-  }, [visible, sort, relations]);
+  }, [visible, sort, relations, semanticOf]);
 
   const getCellContent = useCallback(
     ([col, row]: Item): GridCell => {
-      // Relation columns live after the real data columns.
+      // Relation columns live after the real data columns. Each cell shows the
+      // count for THAT row, e.g. `order_items (3)`; zero counts are dimmed (§1).
       if (col >= visible.length) {
         const rel = relations[col - visible.length];
         if (rel) {
           const count = relationCounts?.get(row)?.get(rel.id);
-          const label =
-            rel.direction === "incoming"
-              ? count != null
-                ? `${rel.targetTable} · ${count}`
-                : rel.targetTable
-              : rel.targetTable;
+          const isZero = count === 0;
+          const label = count != null ? `${rel.targetTable} (${count})` : rel.targetTable;
           return {
-            kind: GridCellKind.Bubble,
-            data: [label],
+            kind: GridCellKind.Text,
+            data: label,
+            displayData: label,
             allowOverlay: false,
+            cursor: isZero ? "default" : "pointer",
             themeOverride: {
-              textBubble: token("--color-info"),
-              bgBubble: token("--color-bg-surface"),
+              textDark: isZero ? token("--color-text-muted") : token("--color-accent"),
+              baseFontStyle: "12px",
             },
           };
         }
@@ -199,6 +230,7 @@ export function DataGrid({
       const def = mapped?.c;
       const raw = mapped ? rows[row]?.[mapped.originalIndex] : undefined;
       const format = def ? columnConfig(def.name).format : "text";
+      const isFk = def ? fkByColumn.has(def.name) : false;
 
       if (raw === null || raw === undefined) {
         return {
@@ -210,6 +242,18 @@ export function DataGrid({
             textDark: token("--color-text-muted"),
             baseFontStyle: "italic 12px",
           },
+        };
+      }
+      // FK value rendered as an accent-colored link with a trailing → (§2).
+      if (isFk) {
+        const text = String(raw);
+        return {
+          kind: GridCellKind.Text,
+          data: text,
+          displayData: `${text} →`,
+          allowOverlay: false,
+          cursor: "pointer",
+          themeOverride: { textDark: token("--color-accent") },
         };
       }
       if (typeof raw === "boolean" || (def && isBool(def))) {
@@ -239,7 +283,7 @@ export function DataGrid({
         allowOverlay: true,
       };
     },
-    [visible, rows, columnConfig, relations, relationCounts]
+    [visible, rows, columnConfig, relations, relationCounts, fkByColumn]
   );
 
   const onHeaderClicked = useCallback(
@@ -256,11 +300,21 @@ export function DataGrid({
 
   const onCellClicked = useCallback(
     ([col, row]: Item) => {
-      if (col < visible.length) return;
-      const rel = relations[col - visible.length];
-      if (rel) onRelationClick?.(row, rel);
+      // Relation cell → drill into related rows.
+      if (col >= visible.length) {
+        const rel = relations[col - visible.length];
+        if (rel) onRelationClick?.(row, rel);
+        return;
+      }
+      // FK cell → drill into the parent row (N:1).
+      const mapped = visible[col];
+      const def = mapped?.c;
+      if (def && fkByColumn.has(def.name)) {
+        const value = rows[row]?.[mapped.originalIndex];
+        if (value !== null && value !== undefined) onFkClick?.(row, def, value);
+      }
     },
-    [visible.length, relations, onRelationClick]
+    [visible, relations, onRelationClick, fkByColumn, rows, onFkClick]
   );
 
   const onGridSelectionChange = useCallback(
@@ -281,6 +335,7 @@ export function DataGrid({
     <div className="gdg-wrapper">
       <DataEditor
         theme={glide}
+        headerIcons={HEADER_ICONS}
         getCellContent={getCellContent}
         columns={gridColumns}
         rows={rows.length}
