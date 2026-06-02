@@ -437,3 +437,44 @@ Grid header font = `Inter Variable` (mono is for values). Reused in DetailPanel.
   `preview_changes_sql` → `commit_changes`); for us, route through an UPDATE on
   a write connection behind a confirm dialog (ties to the MCP write guard).
   This is the "edit + preview/commit writes" step, surfaced via the ROW panel.
+
+---
+
+# Behavioral logic (handlers, keymap, edit/commit flow)
+
+## Keymap — `DEFAULT_KEYMAP` (id → [{shortcut:{key,mod,shift,alt,ctrl}, when}])
+Multi-binding + user-customizable; `when` guards context (e.g. `!inputFocus`).
+```
+core.palette  / (also ⌘K, ⌘P)   core.db-switcher          ⌘D
+core.new-sql-tab        ⌘T       core.new-explorer-tab     ⌘⇧E
+core.new-connection     ⌘⇧N      core.close-tab            ⌘W
+core.next-tab           ⌘⇧]      core.prev-tab             ⌘⇧[
+core.open-settings      ⌘,       core.toggle-sidebar       ⌘/
+core.toggle-context-sidebar ⌘⇧/  core.toggle-log-panel     ⌘J
+core.schema-graph       ⌘⇧G      core.reconnect            ⇧R
+core.focus-explorer-search ⇧T    core.zoom-in/out/reset    ⌘= / ⌘- / ⌘0
+explorer.nav.child/parent/next/prev  ⌘→ / ⌘← / ⌘↓ / ⌘↑
+table.add-filter        f
+```
+
+## Grid interaction handlers (Glide, actually wired)
+- `onCellActivated` → open editor / follow relation (drilldown) / FK navigate
+- `onHeaderClicked` → cycle sort; `onHeaderMenuClick` → column header menu
+- `onDelete` → clear cells / delete rows (shift+Del)
+- `onPaste` + `coercePasteValue` → paste-to-edit with per-type coercion
+- `onItemHovered` → hover preview (image card)
+- `onRowAppended` → insert row (double-click below last row)
+- `onFillPattern` → fill-by-drag; `onCellsEdited` → multi-cell edit
+
+## Edit → commit flow (optimistic staging)
+A per-table **`usePendingChanges`** store stages edits (not written directly):
+```
+previewChangesSql(connectionId, changes) → invoke("preview_changes_sql", {changes})
+   → SQL shown in the confirm dialog
+commitChanges(connectionId, changes)     → invoke("commit_changes", {changes})
+revertCellUpdate / revertRowChanges        → drop a staged edit
+```
+Pattern = **optimistic staged edit → preview SQL → confirm → commit**, with
+inline commit errors surfaced in the dialog (changelog v0.5.13). For our fork,
+`changes` → an UPDATE/INSERT/DELETE behind a confirm, gated by the MCP
+read/write guard. This is the backbone of Agent C's editable ROW panel.
