@@ -478,3 +478,28 @@ Pattern = **optimistic staged edit → preview SQL → confirm → commit**, wit
 inline commit errors surfaced in the dialog (changelog v0.5.13). For our fork,
 `changes` → an UPDATE/INSERT/DELETE behind a confirm, gated by the MCP
 read/write guard. This is the backbone of Agent C's editable ROW panel.
+
+## Other events / interactions (the rest of the behavioral layer)
+
+- **Resizable panels (custom, no lib).** `onPointerDown` + `onResizeStart`
+  drag; sizes persisted in a layout store: `sidebarWidth` (left CONNECTIONS/
+  EXPLORER), `contextSidebarWidth` (right context sidebar), log-panel height.
+  Toggles: sidebar `⌘/`, context sidebar `⌘⇧/`, log panel `⌘J`. (We do this
+  ad-hoc per panel — should centralize in a layout store.) `ResizeObserver`
+  (×53) drives column auto-size + layout reflow.
+- **Drag & drop = `@dnd-kit`** (DndContext/useSortable/useDraggable). Used to
+  reorder connections + favorites and **move them into folders**, reorder
+  columns (`onColumnProposeMove`), and reorder breadcrumb nodes.
+- **Insert row** = Glide `trailingRowOptions` (sticky trailing "+" row, tint,
+  hint) + `onRowAppended` → stages a new row (double-click below last row, or
+  `+`); commits via the staging flow above.
+- **Context menus** (`onContextMenu` ×25): column header (Sort/Filter/Copy/
+  Hide/Configure), sidebar item (favorite/rename/delete/copy name+qualified
+  name), and cell context menu (copy cell / row-as-JSON / delete).
+- **New-tab `+` menu**: Explorer Tab `⌘⇧E`, Graph Tab `⌘⇧G`, SQL Tab `⌘T`.
+- **Keyboard** (`onKeyDown` ×81): the keymap + grid nav (arrows, Tab cycles
+  cells/rows without entering edit, copy `⌘C` / qualified `⌘⇧C`, clear cells
+  Backspace/Delete, delete rows Shift+Backspace/Delete, run query
+  ctrl/⌘/shift+Enter).
+- **Hover** (`onItemHovered`): image-URL cells show a full-size preview card.
+- **Lazy loading** (`IntersectionObserver` ×8): explorer/results virtualization.
