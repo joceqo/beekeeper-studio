@@ -481,12 +481,15 @@ read/write guard. This is the backbone of Agent C's editable ROW panel.
 
 ## Other events / interactions (the rest of the behavioral layer)
 
-- **Resizable panels (custom, no lib).** `onPointerDown` + `onResizeStart`
-  drag; sizes persisted in a layout store: `sidebarWidth` (left CONNECTIONS/
-  EXPLORER), `contextSidebarWidth` (right context sidebar), log-panel height.
-  Toggles: sidebar `⌘/`, context sidebar `⌘⇧/`, log panel `⌘J`. (We do this
-  ad-hoc per panel — should centralize in a layout store.) `ResizeObserver`
-  (×53) drives column auto-size + layout reflow.
+- **Resizable panels.** SlashTable hand-rolls it (`onPointerDown` +
+  `onResizeStart`); sizes persisted in a layout store: `sidebarWidth` (left
+  CONNECTIONS/EXPLORER), `contextSidebarWidth` (right context sidebar),
+  log-panel height. Toggles: sidebar `⌘/`, context sidebar `⌘⇧/`, log panel
+  `⌘J`. `ResizeObserver` (×53) drives column auto-size + layout reflow.
+  → **For our fork we'll use `react-resizable-panels`** (PanelGroup / Panel /
+  PanelResizeHandle, `autoSaveId` persistence, collapsible, min/max) instead of
+  custom drag — cleaner + keyboard-accessible. Replaces all the ad-hoc
+  per-panel resize (sidebar, detail dock, activity/log panel).
 - **Drag & drop = `@dnd-kit`** (DndContext/useSortable/useDraggable). Used to
   reorder connections + favorites and **move them into folders**, reorder
   columns (`onColumnProposeMove`), and reorder breadcrumb nodes.
