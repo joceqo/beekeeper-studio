@@ -76,6 +76,13 @@ module.exports = {
     {
       from: "node_modules/ws",
       to: "node_modules/ws"
+    },
+    {
+      // Opt-in React renderer (BKS_REACT). Built studio-react/dist ships into
+      // the packaged resources dir, landing at <resources>/studio-react and
+      // loaded via file:// by WindowBuilder.ts (process.resourcesPath).
+      from: "../../studio-react/dist",
+      to: "studio-react"
     }
   ],
   fileAssociations: [

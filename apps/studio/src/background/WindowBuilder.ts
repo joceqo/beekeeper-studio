@@ -74,9 +74,14 @@ class BeekeeperWindow {
     let appUrl = platformInfo.isDevelopment ? devUrl : startUrl
     // const appUrl = startUrl
     if (reactRenderer) {
+      // prod: studio-react/dist is shipped via electron-builder extraResources
+      // (electron-builder-config.js -> to: "studio-react"), landing in
+      // process.resourcesPath. extraResources is used (not files/asar) because
+      // file:// cannot read assets packed inside app.asar.
+      const reactProdPath = path.join(process.resourcesPath, 'studio-react', 'index.html')
       appUrl = platformInfo.isDevelopment
         ? reactDevUrl
-        : `file://${path.join(__dirname, '..', 'studio-react', 'index.html')}`
+        : `file://${reactProdPath}`
     }
     const queryObj: any = openOptions ? { ...openOptions } : {}
 
