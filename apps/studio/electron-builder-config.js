@@ -162,14 +162,14 @@ module.exports = {
   mac: {
     entitlements: "./build/entitlements.mac.plist",
     entitlementsInherit: "./build/entitlements.mac.plist",
-    icon: './public/icons/mac/bk-icon.icns',
+    icon: './public/icons/studio/icon.icns',
     category: "public.app-category.developer-tools",
     "hardenedRuntime": true,
     notarize: true,
     publish: ['github']
   },
   linux: {
-    icon: './public/icons/png/',
+    icon: './public/icons/studio/icon-512.png',
     category: "Development",
     target: [
       'snap',
@@ -229,7 +229,7 @@ module.exports = {
     plugs: ["default", "ssh-keys", "removable-media", "mount-observe"]
   },
   win: {
-    icon: './public/icons/png/512x512.png',
+    icon: './public/icons/studio/icon-512.png',
     // FIXME: Add AppX/MSIX build back in once certificate issues resolved
     target: ['nsis', 'portable'],
     publish: ['github'],

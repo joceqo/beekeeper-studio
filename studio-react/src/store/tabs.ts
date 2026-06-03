@@ -87,6 +87,8 @@ export interface Tab {
   /** for graph tabs: focus the graph on this root table (depth-from-focus). */
   rootTable?: string;
   rootSchema?: string;
+  /** for connection tabs: the saved connection being edited (absent = new). */
+  editConnectionId?: string;
   /** for query tabs, persisted editor text */
   sql?: string;
   /**
@@ -118,7 +120,7 @@ interface TabsState {
   bootstrap: () => Promise<void>;
   openTable: (connectionId: string, schema: string, table: string) => void;
   openQuery: () => void;
-  openConnection: () => void;
+  openConnection: (editConnectionId?: string) => void;
   openGraph: (
     connectionId: string,
     schema?: string,
@@ -316,13 +318,20 @@ export const useTabsStore = create<TabsState>((set, get) => ({
     set((s) => ({ tabs: [...s.tabs, tab], activeId: tab.id }));
   },
 
-  openConnection: () => {
+  openConnection: (editConnectionId?: string) => {
+    const title = editConnectionId ? "Edit Connection" : "New Connection";
+    // Reuse the single connection tab, repurposing it for the requested mode.
     const existing = get().tabs.find((t) => t.kind === "connection");
     if (existing) {
-      set({ activeId: existing.id });
+      set((s) => ({
+        activeId: existing.id,
+        tabs: s.tabs.map((t) =>
+          t.id === existing.id ? { ...t, title, editConnectionId } : t
+        ),
+      }));
       return;
     }
-    const tab: Tab = { id: nextId("conn"), kind: "connection", title: "New Connection" };
+    const tab: Tab = { id: nextId("conn"), kind: "connection", title, editConnectionId };
     set((s) => ({ tabs: [...s.tabs, tab], activeId: tab.id }));
   },
 

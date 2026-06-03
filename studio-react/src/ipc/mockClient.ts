@@ -3,6 +3,8 @@ import type {
   CellValue,
   ColumnDef,
   ColumnStats,
+  Connection,
+  ConnectionConfig,
   GetRecordsParams,
   GetRelationCountsParams,
   GetSchemaGraphOptions,
@@ -398,6 +400,40 @@ export class MockBackendClient implements BackendClient {
       lastCall: { name: "list_tables", durationMs: 12 },
       writeConnections: ["postgres"],
     };
+  }
+
+  async newConnection(): Promise<ConnectionConfig> {
+    return {
+      connectionType: "postgres",
+      port: 5432,
+      mcpAccess: "read",
+      sshEnabled: false,
+      sshPort: 22,
+      sshMode: "agent",
+    };
+  }
+
+  async saveConnection(config: ConnectionConfig): Promise<Connection> {
+    await delay(jitter(80, 200));
+    return {
+      id: "mock:saved",
+      name: config.name || "New Connection",
+      kind: (config.connectionType as Connection["kind"]) ?? "postgres",
+      host: config.host ?? undefined,
+      connected: false,
+    };
+  }
+
+  async testConnection(_config: ConnectionConfig): Promise<void> {
+    await delay(jitter(120, 300));
+  }
+
+  async getConnectionConfig(_connectionId: string): Promise<ConnectionConfig | null> {
+    return { connectionType: "postgres", name: "Mock connection", host: "localhost", port: 5432 };
+  }
+
+  async removeConnection(_connectionId: string): Promise<void> {
+    await delay(jitter(40, 120));
   }
 
   async getRecords(params: GetRecordsParams): Promise<RecordPage> {

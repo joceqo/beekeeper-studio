@@ -70,6 +70,8 @@ declare global {
 export interface BackendTransport {
   setPort(port: MessagePort, sId: string): void;
   readonly sId: string | undefined;
+  /** Resolves once the port + sId are available (after the handshake). */
+  whenReady(): Promise<void>;
   send<T = unknown>(name: string, args?: Record<string, unknown>): Promise<T>;
   addListener(type: string, listener: Listener): string;
   removeListener(id: string): void;
@@ -86,13 +88,26 @@ export class MessagePortTransport implements BackendTransport {
   private readonly listeners: { type: string; id: string; listener: Listener }[] = [];
   private readonly messageQueue: QueuedMessage[] = [];
 
+  private _ready!: Promise<void>;
+  private _resolveReady!: () => void;
+  constructor() {
+    this._ready = new Promise<void>((resolve) => {
+      this._resolveReady = resolve;
+    });
+  }
+
   get sId(): string | undefined {
     return this._sId;
+  }
+
+  whenReady(): Promise<void> {
+    return this._ready;
   }
 
   setPort(port: MessagePort, sId: string): void {
     this.port = port;
     this._sId = sId;
+    this._resolveReady();
 
     port.onmessage = (msg: MessageEvent) => {
       const data = msg.data as ReplyMessage | PushMessage;

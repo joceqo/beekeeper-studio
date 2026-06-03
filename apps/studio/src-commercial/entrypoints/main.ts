@@ -204,6 +204,16 @@ app.on('browser-window-created', (_event: electron.Event, window: electron.Brows
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.on('ready', async () => {
+  // Fork dock icon (studio-react mode): show the SlashTable-style table icon in
+  // the macOS dock during dev. Packaged builds get their icon from electron-builder.
+  if (process.platform === 'darwin' && app.dock && process.env.BKS_REACT) {
+    try {
+      const iconPath = path.join(__dirname, '..', 'public', 'icons', 'studio', 'icon-1024.png')
+      const img = electron.nativeImage.createFromPath(iconPath)
+      if (!img.isEmpty()) app.dock.setIcon(img)
+    } catch { /* best-effort */ }
+  }
+
   if (isDevelopment && !process.env.IS_TEST) {
 
     // Per: www.npmjs.com/package/electron-devtools-installer?activeTab=readme#what-extensions-can-i-use

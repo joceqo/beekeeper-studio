@@ -16,6 +16,7 @@ import { backend } from "@/ipc";
 import { semanticType, type SemanticType } from "@/lib/relations";
 import { inferSemanticType, resolveSemanticType } from "@/lib/semantic";
 import { SemanticIcon, SEMANTIC_LUCIDE } from "@/components/grid/SemanticIcon";
+import { jsonTokens } from "@/components/grid/semanticCells";
 import { useTabsStore, type DrilldownCrumb } from "@/store/tabs";
 import {
   useColumnConfigStore,
@@ -501,6 +502,38 @@ function formatArray(items: string[]): string {
 }
 
 /** json/code editor: a pencil opens a Dialog with a textarea + validation. */
+/** Tailwind text color per JSON token class, matching the grid's jsonRenderer. */
+const JSON_TOKEN_CLASS: Record<string, string> = {
+  key: "text-accent",
+  string: "text-success",
+  num: "text-warning",
+  bool: "text-danger",
+  punct: "text-text-muted",
+  text: "text-text-secondary",
+};
+
+/** Syntax-highlighted, truncated JSON preview (same tokens as the grid cell). */
+function HighlightedJson({ value, limit = 120 }: { value: string; limit?: number }) {
+  const tokens = jsonTokens(value);
+  const out: React.ReactNode[] = [];
+  let used = 0;
+  for (let i = 0; i < tokens.length; i++) {
+    if (used >= limit) {
+      out.push(<span key="more" className="text-text-muted">…</span>);
+      break;
+    }
+    const t = tokens[i];
+    const text = used + t.text.length > limit ? t.text.slice(0, limit - used) : t.text;
+    used += t.text.length;
+    out.push(
+      <span key={i} className={JSON_TOKEN_CLASS[t.cls] ?? "text-text-secondary"}>
+        {text}
+      </span>
+    );
+  }
+  return <>{out}</>;
+}
+
 function JsonEditor({
   column,
   value,
@@ -514,14 +547,29 @@ function JsonEditor({
   const text = value === null || value === undefined ? "" : String(value);
   const [draft, setDraft] = useState(text);
   const [jsonError, setJsonError] = useState<string | null>(null);
-
-  const preview = text === "" ? "NULL" : text.length > 80 ? text.slice(0, 80) + "…" : text;
+  // Inline entry for an empty value: local state, committed on blur, so an empty
+  // JSON/code field is a typeable input (not a static "NULL"). Local state keeps
+  // focus while typing (the parent value stays null until blur).
+  const [emptyDraft, setEmptyDraft] = useState("");
 
   return (
     <div className="flex items-start gap-1">
-      <code className="min-w-0 flex-1 break-words rounded-sm bg-bg-secondary px-1.5 py-1 text-xs text-text-secondary">
-        {text === "" ? <NullValue /> : preview}
-      </code>
+      {text === "" ? (
+        <Input
+          size="sm"
+          className="min-w-0 flex-1 font-mono"
+          placeholder="NULL"
+          value={emptyDraft}
+          onChange={(e) => setEmptyDraft(e.target.value)}
+          onBlur={() => {
+            if (emptyDraft !== "") onChange(emptyDraft);
+          }}
+        />
+      ) : (
+        <code className="min-w-0 flex-1 break-words rounded-sm bg-bg-secondary px-1.5 py-1 font-mono text-xs text-text-secondary">
+          <HighlightedJson value={text} limit={120} />
+        </code>
+      )}
       <IconButton
         aria-label={`Edit ${column.name}`}
         title="Edit value"

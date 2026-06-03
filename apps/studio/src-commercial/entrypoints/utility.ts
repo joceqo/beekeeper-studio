@@ -11,7 +11,7 @@ import { ConnHandlers } from '../backend/handlers/connHandlers';
 import { FileHandlers } from '@/handlers/fileHandlers';
 import { GeneratorHandlers } from '@/handlers/generatorHandlers';
 import { Handlers } from '../backend/handlers/handlers';
-import { newState, removeState, state } from '@/handlers/handlerState';
+import { newState, removeState, state, allStateIds } from '@/handlers/handlerState';
 import { QueryHandlers } from '@/handlers/queryHandlers';
 import { TabHistoryHandlers } from '@/handlers/tabHistoryHandlers'
 import { ExportHandlers } from '@commercial/backend/handlers/exportHandlers';
@@ -135,6 +135,10 @@ process.parentPort.on('message', async ({ data, ports }) => {
       break;
     case 'close':
       log.info('REMOVING STATE FOR: ', sId);
+      // Tear down the window's parallel child connections ("<sId>#<connId>") too.
+      for (const childId of allStateIds()) {
+        if (childId.startsWith(`${sId}#`)) await removeState(childId);
+      }
       state(sId).port.close();
       await removeState(sId);
       break;
@@ -187,6 +191,12 @@ async function initState(sId: string, port: MessagePortMain) {
 
   state(sId).port.on('message', ({ data }) => {
     const { id, name, args } = data;
+    // A renderer can address multiple parallel connections via synthetic child
+    // sIds ("<windowSid>#<connId>"). Lazily create their state and bind it to this
+    // window's reply port so runHandler can reply over the same channel.
+    const reqSid: string = args?.sId ?? sId;
+    if (!state(reqSid)) newState(reqSid);
+    if (!state(reqSid).port) state(reqSid).port = port;
     runHandler(id, name, args);
   })
 

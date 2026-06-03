@@ -3,6 +3,7 @@ import type {
   CellValue,
   ColumnDef,
   Connection,
+  ConnectionConfig,
   GetRecordsParams,
   GetRelationCountsParams,
   GetSchemaGraphOptions,
@@ -528,6 +529,24 @@ export class McpBackendClient implements BackendClient {
       lastCall: null,
       writeConnections: [],
     };
+  }
+
+  // Creating/saving connections requires the Electron appdb; not available over
+  // the MCP HTTP backend (it only exposes already-saved connections).
+  async newConnection(): Promise<ConnectionConfig> {
+    throw new Error("Creating connections is not supported over the MCP HTTP backend");
+  }
+  async saveConnection(_config: ConnectionConfig): Promise<Connection> {
+    throw new Error("Saving connections is not supported over the MCP HTTP backend");
+  }
+  async testConnection(_config: ConnectionConfig): Promise<void> {
+    throw new Error("Testing connections is not supported over the MCP HTTP backend");
+  }
+  async getConnectionConfig(_connectionId: string): Promise<ConnectionConfig | null> {
+    return null;
+  }
+  async removeConnection(_connectionId: string): Promise<void> {
+    throw new Error("Removing connections is not supported over the MCP HTTP backend");
   }
 
   async getRecords(params: GetRecordsParams): Promise<RecordPage> {

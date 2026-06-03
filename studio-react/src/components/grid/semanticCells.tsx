@@ -118,8 +118,155 @@ export const ratingRenderer: CustomRenderer<RatingCell> = {
   provideEditor: undefined,
 };
 
+// --- JSON syntax-highlighted cell ------------------------------------------
+
+interface JsonCellProps {
+  readonly kind: "semantic-json";
+  /** The raw JSON string from the DB. */
+  readonly value: string;
+}
+export type JsonCell = CustomCell<JsonCellProps>;
+
+type JsonClass = "key" | "string" | "num" | "bool" | "punct" | "text";
+interface JsonRun {
+  text: string;
+  cls: JsonClass;
+}
+
+/**
+ * Token-color palette read from the CSS theme vars (same hues as the SQL
+ * editor + SlashTable's JSON cells). getComputedStyle is only re-read when the
+ * theme flips, keyed on the glide theme's accentColor.
+ */
+let jsonPaletteCache: { key: string; colors: Record<JsonClass, string> } | null = null;
+function jsonPalette(key: string): Record<JsonClass, string> {
+  if (jsonPaletteCache?.key === key) return jsonPaletteCache.colors;
+  const read = (v: string) =>
+    getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const colors: Record<JsonClass, string> = {
+    key: read("--color-accent"),
+    string: read("--color-success"),
+    num: read("--color-warning"),
+    bool: read("--color-danger"),
+    punct: read("--color-text-muted"),
+    text: read("--color-text-secondary"),
+  };
+  jsonPaletteCache = { key, colors };
+  return colors;
+}
+
+/** Compact a large count like SlashTable: 950, 3.4k, 39k, 1.2M. */
+function compactCount(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 10000) return `${(n / 1000).toFixed(1)}k`;
+  if (n < 1e6) return `${Math.round(n / 1000)}k`;
+  return `${(n / 1e6).toFixed(1)}M`;
+}
+
+/**
+ * Tokenize a compact JSON string into colored runs. Object keys (a string
+ * immediately followed by `:`) color differently from string values. Falls back
+ * to a single plain run when the value isn't valid JSON.
+ */
+export function jsonTokens(value: string): JsonRun[] {
+  let s: string;
+  try {
+    s = JSON.stringify(JSON.parse(value));
+  } catch {
+    return [{ text: value, cls: "text" }];
+  }
+  const runs: JsonRun[] = [];
+  let i = 0;
+  while (i < s.length) {
+    const ch = s[i];
+    if (ch === "{" || ch === "}" || ch === "[" || ch === "]" || ch === ":" || ch === ",") {
+      runs.push({ text: ch, cls: "punct" });
+      i++;
+    } else if (ch === '"') {
+      // Read a full string literal (with escapes).
+      let j = i + 1;
+      while (j < s.length) {
+        if (s[j] === "\\") j += 2;
+        else if (s[j] === '"') { j++; break; }
+        else j++;
+      }
+      const literal = s.slice(i, j);
+      // A key is a string immediately before a colon.
+      const isKey = s[j] === ":";
+      runs.push({ text: literal, cls: isKey ? "key" : "string" });
+      i = j;
+    } else if (ch === "-" || (ch >= "0" && ch <= "9")) {
+      let j = i + 1;
+      while (j < s.length && /[0-9.eE+-]/.test(s[j])) j++;
+      runs.push({ text: s.slice(i, j), cls: "num" });
+      i = j;
+    } else if (s.startsWith("true", i) || s.startsWith("false", i) || s.startsWith("null", i)) {
+      const lit = s.startsWith("false", i) ? "false" : s.startsWith("true", i) ? "true" : "null";
+      runs.push({ text: lit, cls: "bool" });
+      i += lit.length;
+    } else {
+      runs.push({ text: ch, cls: "text" });
+      i++;
+    }
+  }
+  return runs;
+}
+
+const JSON_FONT = '12px "JetBrains Mono Variable", ui-monospace, SFMono-Regular, monospace';
+const BADGE_FONT = '500 10px "JetBrains Mono Variable", ui-monospace, monospace';
+
+export const jsonRenderer: CustomRenderer<JsonCell> = {
+  kind: GridCellKind.Custom,
+  isMatch: (c): c is JsonCell =>
+    (c.data as Partial<JsonCellProps>).kind === "semantic-json",
+  draw: (args: DrawArgs<JsonCell>) => {
+    const { ctx, theme, rect } = args;
+    const palette = jsonPalette(theme.accentColor);
+    const runs = jsonTokens(args.cell.data.value);
+    const pad = theme.cellHorizontalPadding;
+    const badgeReserve = 46;
+
+    ctx.save();
+    ctx.font = JSON_FONT;
+    ctx.textBaseline = "alphabetic";
+    const ty = rect.y + rect.height / 2 + getMiddleCenterBias(ctx, theme);
+    const maxX = rect.x + rect.width - pad;
+    let x = rect.x + pad;
+    let consumed = 0;
+    const total = runs.reduce((n, r) => n + r.text.length, 0);
+    let truncated = false;
+
+    for (const run of runs) {
+      const w = ctx.measureText(run.text).width;
+      // Reserve room for the overflow badge once we know more runs remain.
+      if (x + w > maxX - badgeReserve) {
+        truncated = true;
+        break;
+      }
+      ctx.fillStyle = palette[run.cls];
+      ctx.fillText(run.text, x, ty);
+      x += w;
+      consumed += run.text.length;
+    }
+
+    if (truncated) {
+      const label = `+${compactCount(total - consumed)}`;
+      ctx.font = BADGE_FONT;
+      ctx.fillStyle = palette.punct;
+      ctx.textAlign = "right";
+      ctx.globalAlpha = 0.8;
+      ctx.fillText(label, maxX, ty);
+      ctx.globalAlpha = 1;
+      ctx.textAlign = "left";
+    }
+    ctx.restore();
+    return true;
+  },
+  provideEditor: undefined,
+};
+
 /** Custom renderers to register on the Glide DataEditor. */
-export const SEMANTIC_RENDERERS = [colorRenderer, ratingRenderer];
+export const SEMANTIC_RENDERERS = [colorRenderer, ratingRenderer, jsonRenderer];
 
 // --- value formatting (for standard Text/Number cells) ----------------------
 

@@ -12,6 +12,9 @@ import {
   FolderOpen,
   Plus,
   Workflow,
+  Pencil,
+  Trash2,
+  Loader2,
 } from "lucide-react";
 import {
   backend,
@@ -28,7 +31,16 @@ import {
   formatRowEstimate,
   type ExplorerNode,
 } from "@/lib/explorer";
-import { cn, IconButton, Tooltip, Badge, type BadgeProps } from "@/ui";
+import {
+  cn,
+  IconButton,
+  Tooltip,
+  Badge,
+  ContextMenu,
+  notify,
+  type BadgeProps,
+  type MenuEntry,
+} from "@/ui";
 
 const TAG_TONE: Record<NonNullable<Connection["tagColor"]>, BadgeProps["tone"]> = {
   danger: "danger",
@@ -54,10 +66,33 @@ export function Sidebar() {
   const toggleConnection = useSidebarStore((s) => s.toggleConnection);
   const explorerCollapsed = useSidebarStore((s) => s.explorerCollapsed);
   const toggleGroup = useSidebarStore((s) => s.toggleGroup);
+  const connectionsRevision = useSidebarStore((s) => s.connectionsRevision);
+  const refreshConnections = useSidebarStore((s) => s.refreshConnections);
+  const connectedIds = useSidebarStore((s) => s.connectedIds);
+  const connectingIds = useSidebarStore((s) => s.connectingIds);
+  const markConnected = useSidebarStore((s) => s.markConnected);
+  const markDisconnected = useSidebarStore((s) => s.markDisconnected);
+  const markConnecting = useSidebarStore((s) => s.markConnecting);
+  const clearConnecting = useSidebarStore((s) => s.clearConnecting);
 
   const openTable = useTabsStore((s) => s.openTable);
   const openConnection = useTabsStore((s) => s.openConnection);
   const openGraph = useTabsStore((s) => s.openGraph);
+  const tabsList = useTabsStore((s) => s.tabs);
+  const activeTabId = useTabsStore((s) => s.activeId);
+
+  // The table currently open in the active tab — highlighted in the explorer.
+  // Only when that tab belongs to the connection currently being viewed, so a
+  // same-named table in another connection isn't highlighted after switching.
+  const activeTable = useMemo(() => {
+    const tab = tabsList.find((t) => t.id === activeTabId);
+    return tab?.kind === "table" &&
+      tab.schema &&
+      tab.table &&
+      tab.connectionId === activeConnectionId
+      ? { schema: tab.schema, table: tab.table }
+      : null;
+  }, [tabsList, activeTabId, activeConnectionId]);
 
   const [connections, setConnections] = useState<Connection[]>([]);
   const [schemas, setSchemas] = useState<Schema[]>([]);
@@ -82,14 +117,16 @@ export function Sidebar() {
         toggleConnection(conns[0].id);
       }
     });
+    // Re-fetch when a connection is saved (connectionsRevision bump).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [connectionsRevision]);
 
   useEffect(() => {
     if (!activeConnectionId) return;
     let cancelled = false;
     // BUG FIX: await connect so the saved connection id resolves to the live
     // connectionId before listTables/listSchemas fire.
+    markConnecting(activeConnectionId);
     backend
       .connect(activeConnectionId)
       .then(async (liveId) => {
@@ -100,13 +137,18 @@ export function Sidebar() {
         if (!cancelled) {
           setTables(t);
           setSchemas(s);
+          markConnected(activeConnectionId);
         }
       })
       .catch(() => {
         if (!cancelled) {
           setTables([]);
           setSchemas([]);
+          markDisconnected(activeConnectionId);
         }
+      })
+      .finally(() => {
+        if (!cancelled) clearConnecting(activeConnectionId);
       });
     return () => {
       cancelled = true;
@@ -154,12 +196,33 @@ export function Sidebar() {
     );
   }
 
+  const removeConnection = async (c: Connection) => {
+    if (!window.confirm(`Delete connection "${c.name}"? This cannot be undone.`)) return;
+    try {
+      await backend.removeConnection(c.id);
+      refreshConnections();
+      notify.success(`Deleted ${c.name}`);
+    } catch (e) {
+      notify.error(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   const renderConnection = (c: Connection) => {
     const isActive = c.id === activeConnectionId;
     const isOpen = expanded[c.id];
+    const menu: MenuEntry[] = [
+      { label: "Edit…", icon: <Pencil size={13} />, onSelect: () => openConnection(c.id) },
+      { type: "separator" },
+      {
+        label: "Delete",
+        icon: <Trash2 size={13} />,
+        danger: true,
+        onSelect: () => void removeConnection(c),
+      },
+    ];
     return (
+      <ContextMenu key={c.id} items={menu}>
       <button
-        key={c.id}
         className={cn(
           "flex w-full items-center gap-1 rounded-sm px-1.5 py-1 text-left font-mono text-md transition-colors duration-100 ease-out hover:bg-bg-hover",
           isActive
@@ -198,14 +261,22 @@ export function Sidebar() {
             {c.tag}
           </Badge>
         )}
-        <span
-          className={cn(
-            "h-1.5 w-1.5 shrink-0 rounded-full",
-            c.connected ? "bg-success" : "bg-bg-tertiary",
-            c.tag ? "ml-1.5" : "ml-auto"
-          )}
-        />
+        {connectingIds.has(c.id) ? (
+          <Loader2
+            size={12}
+            className={cn("shrink-0 animate-spin text-text-muted", c.tag ? "ml-1.5" : "ml-auto")}
+          />
+        ) : (
+          <span
+            className={cn(
+              "h-1.5 w-1.5 shrink-0 rounded-full",
+              connectedIds.has(c.id) ? "bg-success" : "bg-text-muted/40",
+              c.tag ? "ml-1.5" : "ml-auto"
+            )}
+          />
+        )}
       </button>
+      </ContextMenu>
     );
   };
 
@@ -218,7 +289,7 @@ export function Sidebar() {
         </span>
         <div className="flex items-center gap-1">
           <Tooltip content="New connection">
-            <IconButton size="sm" aria-label="New connection" onClick={openConnection}>
+            <IconButton size="sm" aria-label="New connection" onClick={() => openConnection()}>
               <Plus size={13} />
             </IconButton>
           </Tooltip>
@@ -316,6 +387,7 @@ export function Sidebar() {
                       key={node.kind === "group" ? node.id : `${node.table.schema}.${node.table.name}`}
                       node={node}
                       collapsedMap={explorerCollapsed}
+                      activeTable={activeTable}
                       onToggleGroup={toggleGroup}
                       onOpenTable={(t) =>
                         activeConnectionId && openTable(activeConnectionId, t.schema, t.name)
@@ -339,24 +411,34 @@ export function Sidebar() {
 function ExplorerNodeRow({
   node,
   collapsedMap,
+  activeTable,
   onToggleGroup,
   onOpenTable,
 }: {
   node: ExplorerNode;
   collapsedMap: Record<string, boolean>;
+  activeTable: { schema: string; table: string } | null;
   onToggleGroup: (id: string) => void;
   onOpenTable: (t: TableSummary) => void;
 }) {
+  const isActiveTable = (t: TableSummary) =>
+    !!activeTable && activeTable.schema === t.schema && activeTable.table === t.name;
   if (node.kind === "table") {
     const t = node.table;
     const rows = formatRowEstimate(t.rowEstimate);
+    const active = isActiveTable(t);
     return (
       <button
-        className="flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-md transition-colors duration-100 ease-out hover:bg-bg-hover"
+        className={cn(
+          "flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-md transition-colors duration-100 ease-out hover:bg-bg-hover",
+          active && "bg-accent-subtle"
+        )}
         onClick={() => onOpenTable(t)}
       >
         <TableIcon type={t.type} />
-        <span className="truncate text-text-secondary">{t.name}</span>
+        <span className={cn("truncate", active ? "text-text-primary" : "text-text-secondary")}>
+          {t.name}
+        </span>
         {rows && <span className="ml-auto text-xs tabular-nums text-text-muted">{rows}</span>}
       </button>
     );
@@ -386,14 +468,20 @@ function ExplorerNodeRow({
         <div className="pl-3">
           {node.children.map((child) => {
             const rows = formatRowEstimate(child.table.rowEstimate);
+            const active = isActiveTable(child.table);
             return (
               <button
                 key={`${child.table.schema}.${child.table.name}`}
-                className="flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-md transition-colors duration-100 ease-out hover:bg-bg-hover"
+                className={cn(
+                  "flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-md transition-colors duration-100 ease-out hover:bg-bg-hover",
+                  active && "bg-accent-subtle"
+                )}
                 onClick={() => onOpenTable(child.table)}
               >
                 <TableIcon type={child.table.type} />
-                <span className="truncate text-text-secondary">{child.table.name}</span>
+                <span className={cn("truncate", active ? "text-text-primary" : "text-text-secondary")}>
+                  {child.table.name}
+                </span>
                 {rows && <span className="ml-auto text-xs tabular-nums text-text-muted">{rows}</span>}
               </button>
             );

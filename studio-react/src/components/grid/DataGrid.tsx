@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import DataEditor, {
+  CompactSelection,
   GridCell,
   GridCellKind,
   GridColumn,
@@ -36,6 +37,7 @@ import {
   linkHrefFor,
   type ColorCell,
   type RatingCell,
+  type JsonCell,
 } from "./semanticCells";
 import { ImagePreviewCard } from "./ImagePreviewCard";
 
@@ -204,6 +206,15 @@ export function DataGrid({
   const theme = useThemeStore((s) => s.theme);
   const glide = useMemo(() => glideTheme(), [theme]);
 
+  // Controlled selection so Glide natively draws the active-cell accent ring and
+  // tints a selected column's header (the mechanism SlashTable uses). A header
+  // click selects the whole column; a cell click focuses that cell.
+  const [gridSelection, setGridSelection] = useState<GridSelection>({
+    current: undefined,
+    rows: CompactSelection.empty(),
+    columns: CompactSelection.empty(),
+  });
+
   // Column-header context menu (Agent C): a controlled, point-anchored menu.
   const [headerMenu, setHeaderMenu] = useState<{
     column: ColumnDef;
@@ -271,6 +282,7 @@ export function DataGrid({
         icon: headerIconKey(sem),
         // A menu indicator (the ⋮) opens the column-header context menu (Agent C).
         hasMenu: hasHeaderMenu,
+        // A selected column's header is tinted by Glide natively (gridSelection).
         themeOverride: sem === "fk" ? { fgIconHeader: token("--color-accent") } : undefined,
       };
     });
@@ -396,13 +408,21 @@ export function DataGrid({
             cursor: "pointer",
             themeOverride: { textDark: token("--color-accent") },
           };
-        case "code":
         case "json": {
-          const display = sem === "json" ? formatSemanticValue("json", text) ?? text : text;
+          // Syntax-highlighted JSON drawn on the canvas (jsonRenderer). The full
+          // value is editable in the ROW dock, which opens on cell click.
+          return {
+            kind: GridCellKind.Custom,
+            allowOverlay: false,
+            copyData: formatSemanticValue("json", text) ?? text,
+            data: { kind: "semantic-json", value: text } as JsonCell["data"],
+          } as JsonCell;
+        }
+        case "code": {
           return {
             kind: GridCellKind.Text,
             data: text,
-            displayData: display,
+            displayData: text,
             allowOverlay: true,
             themeOverride: {
               baseFontStyle: "12px",
@@ -605,16 +625,23 @@ export function DataGrid({
 
   const onGridSelectionChange = useCallback(
     (sel: GridSelection) => {
-      // A cell/row selection focuses a row for the detail panel.
+      setGridSelection(sel);
+      // A column selection (header click) focuses that column for the detail
+      // panel; otherwise a cell/row selection focuses a row.
+      if (sel.columns.length > 0) {
+        const colIdx = sel.columns.first();
+        const def = colIdx != null && colIdx < visible.length ? visible[colIdx]?.c : undefined;
+        if (def) onColumnSelect?.(def.name);
+      }
       if (sel.current) {
         onRowSelect?.(sel.current.cell[1]);
       } else if (sel.rows.length > 0) {
         onRowSelect?.(sel.rows.first() ?? null);
-      } else {
+      } else if (sel.columns.length === 0) {
         onRowSelect?.(null);
       }
     },
-    [onRowSelect]
+    [onRowSelect, onColumnSelect, visible]
   );
 
   return (
@@ -634,6 +661,7 @@ export function DataGrid({
         width="100%"
         height="100%"
         getCellsForSelection
+        gridSelection={gridSelection}
         onHeaderClicked={onHeaderClicked}
         onHeaderMenuClick={hasHeaderMenu ? onHeaderMenuClick : undefined}
         onCellClicked={onCellClicked}

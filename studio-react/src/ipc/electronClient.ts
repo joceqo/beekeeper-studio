@@ -3,6 +3,7 @@ import type {
   CellValue,
   ColumnDef,
   Connection,
+  ConnectionConfig,
   GetRecordsParams,
   GetRelationCountsParams,
   GetSchemaGraphOptions,
@@ -163,8 +164,8 @@ export class ElectronBackendClient implements BackendClient {
   /** Saved-connection record cache, keyed by UI id, from listConnections(). */
   private readonly savedById = new Map<string, IConnectionDTO>();
 
-  /** The UI id currently open in this session (one connection per window). */
-  private openUiId: string | undefined;
+  /** UI ids with a live backend connection (parallel connections per window). */
+  private readonly connected = new Set<string>();
   /** In-flight connect() per UI id, to dedupe concurrent opens. */
   private readonly connecting = new Map<string, Promise<string>>();
 
@@ -174,6 +175,20 @@ export class ElectronBackendClient implements BackendClient {
 
   private send<T>(name: string, args?: Record<string, unknown>): Promise<T> {
     return this.transport.send<T>(name, args);
+  }
+
+  /**
+   * Synthetic per-connection session id ("<windowSid>#<uiId>") so each connection
+   * has its own backend State and can stay live in parallel. Callers must await
+   * connect() (which awaits the handshake) before this resolves to a real sId.
+   */
+  private connSid(uiId: string): string {
+    return `${this.transport.sId}#${uiId}`;
+  }
+
+  /** Send a connection-scoped request targeting that connection's backend State. */
+  private sendConn<T>(uiId: string, name: string, args?: Record<string, unknown>): Promise<T> {
+    return this.send<T>(name, { ...(args ?? {}), sId: this.connSid(uiId) });
   }
 
   private async getOsUser(): Promise<string> {
@@ -215,7 +230,8 @@ export class ElectronBackendClient implements BackendClient {
         name: c.name ?? `Connection ${c.id}`,
         kind: kindFor(c.connectionType),
         host: host ?? undefined,
-        connected: this.openUiId === uiId,
+        database: c.defaultDatabase ?? undefined,
+        connected: this.connected.has(uiId),
       });
     }
     return conns;
@@ -228,7 +244,9 @@ export class ElectronBackendClient implements BackendClient {
    * Returns the UI connection id (the session has a single live connection).
    */
   async connect(connectionId: string): Promise<string> {
-    if (this.openUiId === connectionId) return connectionId;
+    // Need the window sId resolved before deriving the per-connection sId.
+    await this.transport.whenReady();
+    if (this.connected.has(connectionId)) return connectionId;
 
     const inFlight = this.connecting.get(connectionId);
     if (inFlight) return inFlight;
@@ -246,8 +264,9 @@ export class ElectronBackendClient implements BackendClient {
         );
       }
       const osUser = await this.getOsUser();
-      await this.send<void>("conn/create", { config, osUser });
-      this.openUiId = connectionId;
+      // Open at this connection's own session id — does NOT disconnect others.
+      await this.send<void>("conn/create", { config, osUser, sId: this.connSid(connectionId) });
+      this.connected.add(connectionId);
       return connectionId;
     })().finally(() => this.connecting.delete(connectionId));
 
@@ -257,7 +276,7 @@ export class ElectronBackendClient implements BackendClient {
 
   async listSchemas(connectionId: string): Promise<Schema[]> {
     await this.connect(connectionId);
-    const schemas = await this.send<string[]>("conn/listSchemas", {});
+    const schemas = await this.sendConn<string[]>(connectionId, "conn/listSchemas", {});
     return (schemas ?? []).map((name) => ({ name, tableCount: 0 }));
   }
 
@@ -265,8 +284,10 @@ export class ElectronBackendClient implements BackendClient {
     await this.connect(connectionId);
     const filter = schema ? { schema } : undefined;
     const [tables, views] = await Promise.all([
-      this.send<TableOrViewDTO[]>("conn/listTables", { filter }),
-      this.send<TableOrViewDTO[]>("conn/listViews", { filter }).catch(() => [] as TableOrViewDTO[]),
+      this.sendConn<TableOrViewDTO[]>(connectionId, "conn/listTables", { filter }),
+      this.sendConn<TableOrViewDTO[]>(connectionId, "conn/listViews", { filter }).catch(
+        () => [] as TableOrViewDTO[]
+      ),
     ]);
     const out: TableSummary[] = (tables ?? []).map((t) => ({
       schema: t.schema ?? schema ?? "",
@@ -292,17 +313,17 @@ export class ElectronBackendClient implements BackendClient {
   ): Promise<TableDescription> {
     await this.connect(connectionId);
     const [columns, pks, indexes, outKeys, inKeys] = await Promise.all([
-      this.send<ExtendedTableColumnDTO[]>("conn/listTableColumns", { table, schema }),
-      this.send<PrimaryKeyColumnDTO[]>("conn/getPrimaryKeys", { table, schema }).catch(
+      this.sendConn<ExtendedTableColumnDTO[]>(connectionId, "conn/listTableColumns", { table, schema }),
+      this.sendConn<PrimaryKeyColumnDTO[]>(connectionId, "conn/getPrimaryKeys", { table, schema }).catch(
         () => [] as PrimaryKeyColumnDTO[]
       ),
-      this.send<TableIndexDTO[]>("conn/listTableIndexes", { table, schema }).catch(
+      this.sendConn<TableIndexDTO[]>(connectionId, "conn/listTableIndexes", { table, schema }).catch(
         () => [] as TableIndexDTO[]
       ),
-      this.send<TableKeyDTO[]>("conn/getTableKeys", { table, schema }).catch(
+      this.sendConn<TableKeyDTO[]>(connectionId, "conn/getTableKeys", { table, schema }).catch(
         () => [] as TableKeyDTO[]
       ),
-      this.send<TableKeyDTO[]>("conn/getIncomingKeys", { table, schema }).catch(
+      this.sendConn<TableKeyDTO[]>(connectionId, "conn/getIncomingKeys", { table, schema }).catch(
         () => [] as TableKeyDTO[]
       ),
     ]);
@@ -363,7 +384,7 @@ export class ElectronBackendClient implements BackendClient {
     const filters = params.where?.trim() ? params.where.trim() : [];
 
     const started = performance.now();
-    const res = await this.send<TableResultDTO>("conn/selectTop", {
+    const res = await this.sendConn<TableResultDTO>(params.connectionId, "conn/selectTop", {
       table: params.table,
       offset,
       limit,
@@ -389,7 +410,9 @@ export class ElectronBackendClient implements BackendClient {
   private async runQuery(connectionId: string, sql: string): Promise<QueryResult> {
     await this.connect(connectionId);
     const started = performance.now();
-    const results = await this.send<NgQueryResultDTO[]>("conn/executeQuery", { queryText: sql });
+    const results = await this.sendConn<NgQueryResultDTO[]>(connectionId, "conn/executeQuery", {
+      queryText: sql,
+    });
     const elapsedMs = Math.round(performance.now() - started);
 
     const first = results?.[0];
@@ -440,7 +463,7 @@ export class ElectronBackendClient implements BackendClient {
             : ident(fk.fromTable);
           const sql = `SELECT count(*) AS n FROM ${qualified} WHERE ${ident(fk.fromColumn)} = ${lit(params.rowKey)}`;
           try {
-            const res = await this.send<NgQueryResultDTO[]>("conn/executeQuery", { queryText: sql });
+            const res = await this.sendConn<NgQueryResultDTO[]>(params.connectionId, "conn/executeQuery", { queryText: sql });
             const n = Number(res?.[0]?.rows?.[0]?.n) || 0;
             out.push({
               fromSchema: fk.fromSchema,
@@ -476,7 +499,7 @@ export class ElectronBackendClient implements BackendClient {
           const col = ident(rel.fromColumn);
           const sql = `SELECT ${col} AS fk, count(*) AS n FROM ${qualified} WHERE ${col} IN (${inList}) GROUP BY ${col}`;
           try {
-            const res = await this.send<NgQueryResultDTO[]>("conn/executeQuery", { queryText: sql });
+            const res = await this.sendConn<NgQueryResultDTO[]>(params.connectionId, "conn/executeQuery", { queryText: sql });
             const rows = res?.[0]?.rows ?? [];
             const byKey: Record<string, number> = {};
             for (const r of rows) {
@@ -504,6 +527,54 @@ export class ElectronBackendClient implements BackendClient {
 
   async getMcpStatus(): Promise<McpStatus> {
     return this.send<McpStatus>("mcp/status", {});
+  }
+
+  async newConnection(): Promise<ConnectionConfig> {
+    return this.send<ConnectionConfig>("appdb/saved/new", {});
+  }
+
+  async saveConnection(config: ConnectionConfig): Promise<Connection> {
+    const saved = await this.send<IConnectionDTO>("appdb/saved/save", {
+      obj: config,
+      options: {},
+    });
+    if (saved?.id == null) throw new Error("Save failed: no connection id returned");
+    const uiId = idFor(saved.id);
+    this.savedById.set(uiId, saved);
+    const host =
+      saved.connectionType === "sqlite"
+        ? saved.path ?? saved.defaultDatabase ?? undefined
+        : saved.host != null
+          ? saved.port != null
+            ? `${saved.host}:${saved.port}`
+            : saved.host
+          : saved.defaultDatabase ?? undefined;
+    return {
+      id: uiId,
+      name: saved.name ?? `Connection ${saved.id}`,
+      kind: kindFor(saved.connectionType),
+      host: host ?? undefined,
+      database: saved.defaultDatabase ?? undefined,
+      connected: this.connected.has(uiId),
+    };
+  }
+
+  async testConnection(config: ConnectionConfig): Promise<void> {
+    const osUser = await this.getOsUser();
+    await this.send<void>("conn/test", { config, osUser });
+  }
+
+  async getConnectionConfig(connectionId: string): Promise<ConnectionConfig | null> {
+    if (!this.savedById.has(connectionId)) await this.listConnections();
+    const config = this.savedById.get(connectionId);
+    return (config as ConnectionConfig) ?? null;
+  }
+
+  async removeConnection(connectionId: string): Promise<void> {
+    const savedId = savedIdFromUiId(connectionId);
+    if (savedId == null) throw new Error(`Invalid connection id ${connectionId}`);
+    await this.send<void>("appdb/saved/remove", { obj: { id: savedId } });
+    this.savedById.delete(connectionId);
   }
 
   async getSchemaGraph(

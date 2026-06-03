@@ -12,6 +12,8 @@ export interface Connection {
   /** Engine: postgres | mysql | sqlite | sqlserver ... */
   kind: "postgres" | "mysql" | "sqlite" | "sqlserver";
   host?: string;
+  /** Default database name (shown in the title-bar connection indicator). */
+  database?: string;
   /** Human label such as "PRD" rendered as a colored tag. */
   tag?: string;
   tagColor?: "danger" | "warning" | "success" | "info" | "neutral";
@@ -24,6 +26,35 @@ export interface Connection {
   /** Optional connection "paint" — a CSS color for the leading dot (SlashTable). */
   paint?: string;
   connected: boolean;
+}
+
+/**
+ * A saved-connection config as exchanged with the backend (appdb/saved/* and
+ * conn/test|create). Mirrors the backend SavedConnection / IConnection record;
+ * loosely typed (index signature) since the form only sets a known subset and
+ * the backend fills the rest with defaults (appdb/saved/new).
+ */
+export interface ConnectionConfig {
+  id?: number | null;
+  name?: string | null;
+  connectionType?: string;
+  host?: string | null;
+  port?: number | null;
+  defaultDatabase?: string | null;
+  username?: string | null;
+  password?: string | null;
+  /** AI-access level honored by the in-app MCP server. */
+  mcpAccess?: "none" | "read" | "write";
+  // SSH tunnel (simple): auth via agent | userpass | keyfile.
+  sshEnabled?: boolean;
+  sshHost?: string | null;
+  sshPort?: number | null;
+  sshUsername?: string | null;
+  sshMode?: null | "agent" | "userpass" | "keyfile";
+  sshPassword?: string | null;
+  sshKeyfile?: string | null;
+  sshKeyfilePassword?: string | null;
+  [k: string]: unknown;
 }
 
 export interface Schema {
@@ -302,6 +333,17 @@ export interface BackendClient {
    * the HTTP/mock backends return a minimal/stubbed status.
    */
   getMcpStatus(): Promise<McpStatus>;
+
+  /** A fresh connection config with backend defaults (for a new connection form). */
+  newConnection(): Promise<ConnectionConfig>;
+  /** Persist a connection config; returns the saved connection (UI shape, with its id). */
+  saveConnection(config: ConnectionConfig): Promise<Connection>;
+  /** Test reachability of a connection config; rejects with the backend error. */
+  testConnection(config: ConnectionConfig): Promise<void>;
+  /** Load a saved connection's full config by UI id, for editing. */
+  getConnectionConfig(connectionId: string): Promise<ConnectionConfig | null>;
+  /** Delete a saved connection by UI id. */
+  removeConnection(connectionId: string): Promise<void>;
 }
 
 /** Live MCP server status (mirrors the backend `mcp/status` handler). */

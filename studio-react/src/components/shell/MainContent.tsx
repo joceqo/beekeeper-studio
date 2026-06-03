@@ -57,5 +57,5 @@ export function MainContent() {
     return <QueryEditor key={tab.id} tabId={tab.id} sql={tab.sql ?? ""} />;
   }
 
-  return <ConnectionScreen key={tab.id} />;
+  return <ConnectionScreen key={tab.id} editConnectionId={tab.editConnectionId} />;
 }
