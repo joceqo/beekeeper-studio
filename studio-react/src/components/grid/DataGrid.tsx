@@ -273,7 +273,8 @@ export function DataGrid({
     // Relation columns are appended after the real data columns with a ↗ header
     // icon, so they read as navigation affordances rather than data.
     const relCols: GridColumn[] = relations.map((r) => ({
-      title: r.targetTable,
+      // Collapsed M2M relations are labeled with the far table, not the junction.
+      title: r.m2m ? r.m2m.farTable : r.targetTable,
       id: REL_COL_PREFIX + r.id,
       width: 170,
       icon: headerIconKey("relation"),
@@ -295,7 +296,8 @@ export function DataGrid({
         if (rel) {
           const count = relationCounts?.get(row)?.get(rel.id);
           const isZero = count === 0;
-          const label = count != null ? `${rel.targetTable} (${count})` : rel.targetTable;
+          const target = rel.m2m ? rel.m2m.farTable : rel.targetTable;
+          const label = count != null ? `${target} (${count})` : target;
           return {
             kind: GridCellKind.Text,
             data: label,

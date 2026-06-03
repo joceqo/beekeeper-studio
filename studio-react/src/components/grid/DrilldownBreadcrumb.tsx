@@ -88,12 +88,17 @@ export function DrilldownBreadcrumb({ tabId, tree, activeNodeId, canBack, canFor
                 onClick={() => activate(tabId, node.id)}
                 onRemove={isRoot ? undefined : () => removeNode(tabId, node.id)}
                 title={
-                  node.filterColumn
-                    ? `${node.filterColumn} = ${node.filterValue}`
-                    : "Origin"
+                  node.m2m
+                    ? `via ${node.via} (${node.m2m.nearColumn} = ${node.m2m.nearValue})`
+                    : node.filterColumn
+                      ? `${node.filterColumn} = ${node.filterValue}`
+                      : "Origin"
                 }
               >
                 {nodeLabel(node)}
+                {node.via && (
+                  <span className="ml-1 font-normal text-text-muted/70">via {node.via}</span>
+                )}
               </Chip>
               {siblings.length > 0 && (
                 <SiblingPill tabId={tabId} siblings={siblings} />

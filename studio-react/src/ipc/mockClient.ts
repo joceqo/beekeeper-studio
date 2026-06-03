@@ -5,6 +5,7 @@ import type {
   ColumnStats,
   GetRecordsParams,
   GetRelationCountsParams,
+  GetSchemaGraphOptions,
   GetTableStatsParams,
   IncomingForeignKey,
   PageRelationCounts,
@@ -24,6 +25,7 @@ import {
   USERS_COLUMNS,
   buildUsersRows,
 } from "./mockData";
+import { focusGraph } from "@/lib/graph";
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const jitter = (lo: number, hi: number) => lo + Math.random() * (hi - lo);
@@ -433,8 +435,12 @@ export class MockBackendClient implements BackendClient {
     };
   }
 
-  async getSchemaGraph(_connectionId: string, schema?: string): Promise<SchemaGraph> {
+  async getSchemaGraph(
+    _connectionId: string,
+    options?: GetSchemaGraphOptions
+  ): Promise<SchemaGraph> {
     await delay(jitter(120, 320));
+    const schema = options?.schema;
     const tables = MOCK_TABLES.filter((t) => !schema || t.schema === schema);
     const colsFor = (table: string) =>
       (table === "users" ? USERS_COLUMNS : genericColumns(table)).map((c) => ({
@@ -442,7 +448,7 @@ export class MockBackendClient implements BackendClient {
         dataType: c.dataType,
         primaryKey: c.primaryKey,
       }));
-    return {
+    const full: SchemaGraph = {
       nodes: tables.map((t) => ({
         schema: t.schema,
         table: t.name,
@@ -479,6 +485,7 @@ export class MockBackendClient implements BackendClient {
           tables.some((t) => t.schema === e.toSchema && t.name === e.toTable)
       ),
     };
+    return focusGraph(full, options);
   }
 
   async executeQuery(_connectionId: string, sql: string): Promise<QueryResult> {

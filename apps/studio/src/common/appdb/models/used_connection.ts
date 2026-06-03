@@ -27,6 +27,7 @@ export class UsedConnection extends DbConnectionBase implements ISimpleConnectio
       this.sslCertFile = other.sslCertFile
       this.sslKeyFile = other.sslKeyFile
       this.readOnlyMode = other.readOnlyMode
+      this.mcpAccess = other.mcpAccess
       if (other.id && other.workspaceId) {
         this.connectionId = other.id
         this.workspaceId = other.workspaceId

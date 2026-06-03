@@ -224,6 +224,18 @@ body {
   opacity: 0.78;
   background: var(--color-bg-primary);
 }
+/* Depth-from-focus root: the pinned table, highlighted with the accent. */
+.schema-node[data-root] {
+  border-color: var(--color-accent);
+  border-style: solid;
+  opacity: 1;
+  box-shadow:
+    0 0 0 1px var(--color-accent),
+    0 2px 8px rgb(0 0 0 / 0.3);
+}
+.schema-node[data-root] .schema-node__header {
+  color: var(--color-accent);
+}
 .schema-node__header {
   display: flex;
   align-items: center;

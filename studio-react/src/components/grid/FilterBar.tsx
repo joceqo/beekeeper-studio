@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Filter, Plus, FolderPlus, X, Ban } from "lucide-react";
+import { Filter, Plus, FolderPlus, X, Ban, Link2 } from "lucide-react";
 import type { ColumnDef } from "@/ipc";
 import { Button, IconButton, Input, Select, Badge, cn } from "@/ui";
 import { useFilterStore } from "@/store/filters";
@@ -20,6 +20,12 @@ import {
 interface Props {
   tabId: string;
   columns: ColumnDef[];
+  /**
+   * When the rows are reached through a many-to-many junction, the join is shown
+   * as a read-only chip so the filter context is explicit (the editable filters
+   * below still apply to the far table's columns).
+   */
+  joinVia?: { junction: string; nearColumn: string; nearValue: string | number };
 }
 
 /**
@@ -30,7 +36,7 @@ interface Props {
  * remove. The active filter is held per tab in {@link useFilterStore} and the
  * compiled WHERE re-drives the grid via TableView/RelationView.
  */
-export function FilterBar({ tabId, columns }: Props) {
+export function FilterBar({ tabId, columns, joinVia }: Props) {
   const [open, setOpen] = useState(false);
   const storedRoot = useFilterStore((s) => s.byTab[tabId]);
   const clearAll = useFilterStore((s) => s.clearAll);
@@ -91,7 +97,17 @@ export function FilterBar({ tabId, columns }: Props) {
           </Button>
         )}
 
-        {!open && activeCount === 0 && (
+        {joinVia && (
+          <span
+            className="flex items-center gap-1 rounded-sm border border-border px-1.5 py-0.5 font-mono text-[11px] text-text-muted"
+            title={`Joined through ${joinVia.junction} where ${joinVia.nearColumn} = ${joinVia.nearValue}`}
+          >
+            <Link2 size={11} className="text-accent" />
+            via {joinVia.junction}
+          </span>
+        )}
+
+        {!open && activeCount === 0 && !joinVia && (
           <span className="text-xs text-text-muted">No filters</span>
         )}
       </div>

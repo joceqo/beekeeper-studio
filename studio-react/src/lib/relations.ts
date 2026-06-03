@@ -3,7 +3,26 @@ import type {
   RelationCount,
   TableDescription,
 } from "@/ipc";
-import type { DrilldownCrumb } from "@/store/tabs";
+import type { DrilldownCrumb, M2MCrumb } from "@/store/tabs";
+
+/**
+ * Structural metadata for a many-to-many relation: the junction (join) table a
+ * relation collapses, and the far table it actually lands on. Attached to a
+ * {@link RelationColumn} so the column is labeled with the far table while page
+ * counts still count the junction (its `target*` fields are unchanged).
+ */
+export interface M2MInfo {
+  junctionSchema: string;
+  junctionTable: string;
+  /** Junction column referencing the source row (the "near" FK). */
+  nearColumn: string;
+  /** Junction column referencing the far table (the "far" FK). */
+  farColumn: string;
+  farSchema: string;
+  farTable: string;
+  /** The far table's referenced column (what `farColumn` points at). */
+  farRefColumn: string;
+}
 
 /**
  * A virtual "relation" column rendered in the data grid alongside real columns.
@@ -28,6 +47,12 @@ export interface RelationColumn {
   targetColumn: string;
   /** Cardinality label for the header / chip. */
   cardinality: "N:1" | "1:N";
+  /**
+   * Set when this relation collapses a many-to-many junction: the column is
+   * labeled with `m2m.farTable` and drilling joins through the junction, while
+   * `target*`/`id` keep pointing at the junction so page counts stay correct.
+   */
+  m2m?: M2MInfo;
 }
 
 /**
@@ -164,6 +189,54 @@ export function relationColumns(
   return out;
 }
 
+/**
+ * Many-to-many junction heuristic, mirroring the schema-graph detector and
+ * SlashTable's SQL detection: a composite primary key of 2+ foreign-key columns
+ * and no other non-keyed columns (every column is a PK or an FK).
+ */
+export function isJoinTable(description: TableDescription): boolean {
+  const fkColumns = new Set(description.foreignKeys.map((fk) => fk.column));
+  if (fkColumns.size < 2) return false;
+  if (description.columns.length === 0) return false;
+  return description.columns.every((c) => c.primaryKey || fkColumns.has(c.name));
+}
+
+/**
+ * Given an incoming relation to a detected junction table and that junction's
+ * description, derive one collapsed M2M relation per far-side FK (every FK other
+ * than the one pointing back to the source). Each result keeps the junction's
+ * id/target columns (so page counts still count junction rows) and carries the
+ * far-side join info in {@link RelationColumn.m2m}.
+ */
+export function m2mRelationsFor(
+  incoming: RelationColumn,
+  junction: TableDescription
+): RelationColumn[] {
+  const nearColumn = incoming.targetColumn; // junction FK -> source row
+  const out: RelationColumn[] = [];
+  for (const fk of junction.foreignKeys) {
+    if (fk.column === nearColumn) continue; // skip the FK back to the source
+    const ref = parseRef(fk.references);
+    if (!ref) continue;
+    out.push({
+      ...incoming,
+      // Unique id per far table so multi-edge junctions don't collide, while
+      // page counts (keyed by id, querying target*) still count the junction.
+      id: `${incoming.id}=>${ref.table}`,
+      m2m: {
+        junctionSchema: incoming.targetSchema,
+        junctionTable: incoming.targetTable,
+        nearColumn,
+        farColumn: fk.column,
+        farSchema: ref.schema ?? incoming.targetSchema,
+        farTable: ref.table,
+        farRefColumn: ref.column,
+      },
+    });
+  }
+  return out;
+}
+
 /** Map a RelationCount back to the matching incoming RelationColumn id. */
 export function relationCountKey(c: RelationCount): string {
   return `__rel_in__:${c.fromTable}:${c.fromColumn}`;
@@ -211,10 +284,31 @@ export function crumbWhere(crumb: DrilldownCrumb): string {
  * For an outgoing relation (parent):   `SELECT * FROM parent WHERE pk = <fk>`.
  */
 export function drilldownSql(crumb: DrilldownCrumb, extraWhere = ""): string {
+  if (crumb.m2m) return m2mDrilldownSql(crumb, crumb.m2m, extraWhere);
   const qualified = `${ident(crumb.schema)}.${ident(crumb.table)}`;
   const parts = [crumbWhere(crumb), extraWhere.trim()].filter((p) => p !== "");
   const whereClause = parts.length ? ` WHERE ${parts.join(" AND ")}` : "";
   return `SELECT * FROM ${qualified}${whereClause} LIMIT 200`;
+}
+
+/**
+ * The read-only SELECT for a many-to-many hop: the far table joined through the
+ * junction, scoped to the source row via the junction's near FK. The far table
+ * and junction are referenced by full name (not aliased) so the FilterBar's
+ * bare far-column filters in `extraWhere` compose unambiguously in the common
+ * case (junction columns are FK ids, far filters are on far columns).
+ */
+function m2mDrilldownSql(crumb: DrilldownCrumb, m2m: M2MCrumb, extraWhere = ""): string {
+  const far = `${ident(crumb.schema)}.${ident(crumb.table)}`;
+  const junction = `${ident(m2m.junctionSchema)}.${ident(m2m.junctionTable)}`;
+  const joinCond = `${far}.${ident(m2m.farRefColumn)} = ${junction}.${ident(m2m.farColumn)}`;
+  const nearCond = `${junction}.${ident(m2m.nearColumn)} = ${sqlLiteral(m2m.nearValue)}`;
+  const parts = [nearCond, extraWhere.trim()].filter((p) => p !== "");
+  return (
+    `SELECT ${far}.* FROM ${far} ` +
+    `JOIN ${junction} ON ${joinCond} ` +
+    `WHERE ${parts.join(" AND ")} LIMIT 200`
+  );
 }
 
 /**
@@ -227,6 +321,25 @@ export function buildCrumb(
   sourceKey: string | number | boolean | null
 ): DrilldownCrumb | null {
   if (sourceKey === null) return null;
+  if (rel.m2m) {
+    // Many-to-many: land on the far table, joining through the junction. No
+    // far-table filterColumn — the scope is the junction's near-FK condition.
+    return {
+      schema: rel.m2m.farSchema,
+      table: rel.m2m.farTable,
+      relation: "incoming",
+      sourceKey: sourceKey as string | number,
+      sourceTable,
+      m2m: {
+        junctionSchema: rel.m2m.junctionSchema,
+        junctionTable: rel.m2m.junctionTable,
+        nearColumn: rel.m2m.nearColumn,
+        nearValue: sourceKey as string | number,
+        farColumn: rel.m2m.farColumn,
+        farRefColumn: rel.m2m.farRefColumn,
+      },
+    };
+  }
   if (rel.direction === "incoming") {
     // children: child.targetColumn = thisRow[localColumn(=PK)]
     return {

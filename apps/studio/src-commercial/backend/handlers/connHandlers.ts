@@ -4,6 +4,7 @@ import { DatabaseFilterOptions, ExtendedTableColumn, FieldDescriptor, FieldEditD
 import { DatabaseElement, IDbConnectionServerConfig } from "@/lib/db/types";
 import { AlterPartitionsSpec, AlterTableSpec, CreateTableSpec, dialectFor, IndexAlterations, RelationAlterations, TableKey } from "@shared/lib/dialects/models";
 import { checkConnection, errorMessages, getDriverHandler, state } from "@/handlers/handlerState";
+import { normalizeMcpAccess } from "@/backend/mcp/access";
 import ConnectionProvider from '../lib/connection-provider';
 import { uuidv4 } from "@/lib/uuid";
 import { SqlGenerator } from "@shared/lib/sql/SqlGenerator";
@@ -182,6 +183,9 @@ export const ConnHandlers: IConnectionHandlers = {
 
     state(sId).server = server;
     state(sId).usedConfig = config;
+    // Record the connection's AI-access level so the MCP server honors the saved
+    // level for UI-opened connections (the connect tool sets it on the config).
+    state(sId).mcpAccess = normalizeMcpAccess(config.mcpAccess);
     state(sId).connection = connection;
     state(sId).database = config.defaultDatabase;
     state(sId).generator = new SqlGenerator(dialectFor(config.connectionType), {

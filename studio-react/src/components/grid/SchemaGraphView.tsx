@@ -13,18 +13,24 @@ import {
   type Node,
   type Edge,
   type NodeProps,
+  type NodeMouseHandler,
   type ColorMode,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import dagre from "dagre";
-import { RefreshCw, AlertTriangle, Key, Link2 } from "lucide-react";
+import { RefreshCw, AlertTriangle, Key, Link2, Pin } from "lucide-react";
 import { backend, type SchemaGraph, type SchemaGraphNode } from "@/ipc";
+import { graphKey, mergeGraphs } from "@/lib/graph";
 import { useThemeStore } from "@/store/theme";
 import { IconButton, Button, Tooltip } from "@/ui";
 
 interface Props {
   connectionId: string;
   schema?: string;
+  /** When set, the graph opens focused on this table (depth 1) instead of
+   * dumping the whole schema; clicking a node expands its FK neighbors. */
+  rootTable?: string;
+  rootSchema?: string;
 }
 
 const NODE_WIDTH = 230;
@@ -49,6 +55,8 @@ interface TableNodeData {
   columns: NodeColumn[];
   /** Detected M2M join table (see heuristic below). */
   isJoinTable: boolean;
+  /** The focus root in a depth-from-focus graph (pinned, highlighted). */
+  isRoot: boolean;
   [key: string]: unknown;
 }
 
@@ -74,9 +82,11 @@ function TableNodeView({ data }: NodeProps<TableNode>) {
     <div
       className="schema-node"
       data-join={data.isJoinTable || undefined}
+      data-root={data.isRoot || undefined}
       style={{ width: NODE_WIDTH }}
     >
       <div className="schema-node__header" style={{ height: HEADER_HEIGHT }}>
+        {data.isRoot && <Pin size={10} className="shrink-0 text-accent" />}
         <span className="schema-node__title">{qualified}</span>
         {data.isJoinTable && <span className="schema-node__badge">join</span>}
       </div>
@@ -162,8 +172,12 @@ function detectJoinTable(node: SchemaGraphNode, fkColumns: Set<string>): boolean
   return fkCount >= 2 && nonKeyed === 0;
 }
 
-/** Build React Flow nodes/edges with a dagre directed (left-to-right) layout. */
-function buildGraph(graph: SchemaGraph): { nodes: TableNode[]; edges: Edge[] } {
+/** Build React Flow nodes/edges with a dagre directed (left-to-right) layout.
+ * `rootKey` (when given) marks the pinned focus node. */
+function buildGraph(
+  graph: SchemaGraph,
+  rootKey: string | null
+): { nodes: TableNode[]; edges: Edge[] } {
   // FK source columns per table — used both for the column icon and the M2M heuristic.
   const fkByTable = new Map<string, Set<string>>();
   for (const e of graph.edges) {
@@ -203,6 +217,7 @@ function buildGraph(graph: SchemaGraph): { nodes: TableNode[]; edges: Edge[] } {
         schema: n.schema,
         table: n.table,
         isJoinTable: detectJoinTable(n, fkCols),
+        isRoot: k === rootKey,
         columns: n.columns.map((c) => ({
           name: c.name,
           dataType: c.dataType,
@@ -240,28 +255,64 @@ function buildGraph(graph: SchemaGraph): { nodes: TableNode[]; edges: Edge[] } {
   return { nodes, edges };
 }
 
-export function SchemaGraphView({ connectionId, schema }: Props) {
+export function SchemaGraphView({ connectionId, schema, rootTable, rootSchema }: Props) {
   const themeMode = useThemeStore((s) => s.theme);
   const [graph, setGraph] = useState<SchemaGraph | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Keys already expanded in focused mode, so a node is only fetched once.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const [nodes, setNodes, onNodesChange] = useNodesState<TableNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
+  const focused = !!rootTable;
+  const rootKey = useMemo(
+    () => (rootTable ? graphKey(rootSchema ?? schema ?? "public", rootTable) : null),
+    [rootTable, rootSchema, schema]
+  );
+
   const load = useCallback(() => {
     setLoading(true);
     setError(null);
+    setExpanded(rootKey ? new Set([rootKey]) : new Set());
     backend
-      .getSchemaGraph(connectionId, schema)
+      .getSchemaGraph(
+        connectionId,
+        rootTable ? { schema, rootTable, rootSchema, depth: 1 } : { schema }
+      )
       .then(setGraph)
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
-  }, [connectionId, schema]);
+  }, [connectionId, schema, rootTable, rootSchema, rootKey]);
 
   useEffect(load, [load]);
 
-  const built = useMemo(() => (graph ? buildGraph(graph) : null), [graph]);
+  // Focused mode: clicking a node pulls in its FK neighbors (depth 1) and merges
+  // them into the visible graph. Each node expands at most once.
+  const onNodeClick = useCallback<NodeMouseHandler<TableNode>>(
+    (_event, node) => {
+      if (!focused) return;
+      const key = graphKey(node.data.schema, node.data.table);
+      if (expanded.has(key)) return;
+      setExpanded((prev) => new Set(prev).add(key));
+      backend
+        .getSchemaGraph(connectionId, {
+          schema,
+          rootTable: node.data.table,
+          rootSchema: node.data.schema,
+          depth: 1,
+        })
+        .then((more) => setGraph((cur) => (cur ? mergeGraphs(cur, more) : more)))
+        .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+    },
+    [focused, expanded, connectionId, schema]
+  );
+
+  const built = useMemo(
+    () => (graph ? buildGraph(graph, rootKey) : null),
+    [graph, rootKey]
+  );
 
   useEffect(() => {
     if (built) {
@@ -278,10 +329,17 @@ export function SchemaGraphView({ connectionId, schema }: Props) {
             <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
           </IconButton>
         </Tooltip>
-        <Link2 size={13} className="text-text-muted" />
+        {focused ? <Pin size={13} className="text-accent" /> : <Link2 size={13} className="text-text-muted" />}
         <span className="font-mono text-xs text-text-muted">
-          {schema ? `${schema} schema graph` : "schema graph"}
+          {focused
+            ? `${rootTable} · depth 1`
+            : schema
+              ? `${schema} schema graph`
+              : "schema graph"}
         </span>
+        {focused && (
+          <span className="text-xs text-text-muted/70">click a node to expand</span>
+        )}
         <span className="ml-auto text-xs text-text-muted">
           {graph ? `${graph.nodes.length} tables · ${graph.edges.length} relations` : "—"}
         </span>
@@ -311,6 +369,7 @@ export function SchemaGraphView({ connectionId, schema }: Props) {
             edges={edges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
+            onNodeClick={onNodeClick}
             nodeTypes={nodeTypes}
             colorMode={themeMode as ColorMode}
             fitView

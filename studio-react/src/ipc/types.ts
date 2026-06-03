@@ -219,6 +219,21 @@ export interface SchemaGraph {
   edges: SchemaGraphEdge[];
 }
 
+export interface GetSchemaGraphOptions {
+  /** Restrict the graph to a single schema. */
+  schema?: string;
+  /**
+   * Focus the graph on a root table: only tables within `depth` FK-hops of it
+   * are returned (a SlashTable "depth-from-focus" graph). Without `rootTable`
+   * the whole schema is returned.
+   */
+  rootTable?: string;
+  /** Schema of `rootTable` (defaults to `schema`, then "public"). */
+  rootSchema?: string;
+  /** Max FK-hops from `rootTable` (default 1). Ignored without `rootTable`. */
+  depth?: number;
+}
+
 /**
  * The single narrow seam between the renderer and the backend.
  * A real implementation posts each call over a MessagePort
@@ -252,7 +267,15 @@ export interface BackendClient {
    * reject rather than silently no-op.
    */
   executeWrite(connectionId: string, sql: string): Promise<QueryResult>;
-  getSchemaGraph(connectionId: string, schema?: string): Promise<SchemaGraph>;
+  /**
+   * Foreign-key relationship graph. With {@link GetSchemaGraphOptions.rootTable}
+   * the result is limited to the tables within `depth` FK-hops of that table
+   * (depth-from-focus); otherwise the whole schema is returned.
+   */
+  getSchemaGraph(
+    connectionId: string,
+    options?: GetSchemaGraphOptions
+  ): Promise<SchemaGraph>;
   /**
    * Best-effort related-row counts for a single source row, used to badge the
    * relation columns in the grid. Implementations should resolve to `[]` (not

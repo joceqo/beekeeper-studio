@@ -8,6 +8,7 @@ import { SavedConnection } from "@/common/appdb/models/saved_connection";
 import { dialectFor, defaultEscapeString, defaultWrapIdentifier } from "@shared/lib/dialects/models";
 import { getDialectData } from "@shared/lib/dialects";
 import { checkSqlAccess, GuardDialect, McpAccess } from "./sqlGuard";
+import { normalizeMcpAccess, resolveConnectAccess } from "./access";
 
 const log = rawLog.scope("McpTools");
 
@@ -181,15 +182,19 @@ export function createTools(deps: ToolDeps): McpTool[] {
       async handler() {
         const saved = await SavedConnection.find({ order: { name: "ASC" } });
         return ok(
-          saved.map((c) => ({
-            savedConnectionId: c.id,
-            name: c.name,
-            connectionType: c.connectionType,
-            host: c.host ?? null,
-            port: c.port ?? null,
-            database: c.defaultDatabase ?? null,
-            open: !!state(mcpSessionId(c.id))?.connection,
-          }))
+          saved
+            // Hidden connections (mcpAccess "none") are never exposed over MCP.
+            .filter((c) => normalizeMcpAccess(c.mcpAccess, defaultAccess) !== "none")
+            .map((c) => ({
+              savedConnectionId: c.id,
+              name: c.name,
+              connectionType: c.connectionType,
+              host: c.host ?? null,
+              port: c.port ?? null,
+              database: c.defaultDatabase ?? null,
+              mcpAccess: normalizeMcpAccess(c.mcpAccess, defaultAccess),
+              open: !!state(mcpSessionId(c.id))?.connection,
+            }))
         );
       },
     },
@@ -198,10 +203,12 @@ export function createTools(deps: ToolDeps): McpTool[] {
       name: "connect",
       description:
         "Open a saved database connection by its savedConnectionId (from list_saved_connections). " +
-        "Pass access='read' (default) to allow only SELECT/WITH/EXPLAIN/SHOW, or access='write' to " +
-        "allow any SQL including INSERT/UPDATE/DELETE and DDL. Read connections are also opened in the " +
-        "driver's read-only mode (enforced below the SQL guard). Returns the connectionId to pass to " +
-        "the other tools. Idempotent; calling again with a different access reopens the connection.",
+        "By default the connection opens at its saved AI-access level. The saved level is a ceiling: " +
+        "you may pass access='read' to further restrict a write-enabled connection to read-only for this " +
+        "session, but you cannot widen beyond the saved level (requesting 'write' on a read connection is " +
+        "refused). Read connections are also opened in the driver's read-only mode (enforced below the SQL " +
+        "guard). Connections whose AI access is Hidden cannot be opened. Returns the connectionId to pass " +
+        "to the other tools. Idempotent; calling again with a different access reopens the connection.",
       inputSchema: {
         savedConnectionId: z
           .number()
@@ -210,12 +217,25 @@ export function createTools(deps: ToolDeps): McpTool[] {
         access: z
           .enum(["read", "write"])
           .optional()
-          .describe("Access level for this connection (default read)"),
+          .describe("Access level for this connection (defaults to the connection's saved AI access)"),
       },
       async handler(args) {
         const savedId = Number(args.savedConnectionId);
-        const access: McpAccess = (args.access as McpAccess) ?? "read";
         const sId = mcpSessionId(savedId);
+
+        const config = await SavedConnection.findOneBy({ id: savedId });
+        if (!config) {
+          return fail(`No saved connection with id ${savedId}`);
+        }
+
+        // Default to the connection's saved AI-access level (a ceiling): an
+        // explicit arg may only narrow it. Hidden connections are never openable.
+        const saved = normalizeMcpAccess(config.mcpAccess, defaultAccess);
+        const resolved = resolveConnectAccess(saved, args.access as McpAccess | undefined);
+        if (resolved.refused) {
+          return fail(`Cannot open connection ${savedId} over MCP: ${resolved.reason}.`);
+        }
+        const access = resolved.access;
 
         const existing = state(sId);
         if (existing?.connection) {
@@ -228,13 +248,11 @@ export function createTools(deps: ToolDeps): McpTool[] {
           await ConnHandlers["conn/clearConnection"]({ sId });
         }
 
-        const config = await SavedConnection.findOneBy({ id: savedId });
-        if (!config) {
-          return fail(`No saved connection with id ${savedId}`);
-        }
         // Defense in depth: read connections also run in the driver's read-only
-        // mode, which rejects mutating queries below our SQL guard.
+        // mode, which rejects mutating queries below our SQL guard. Reflect the
+        // resolved access on the config so conn/create records it on the state.
         config.readOnlyMode = access === "read";
+        config.mcpAccess = access;
 
         if (!state(sId)) newState(sId);
         state(sId).mcpAccess = access;

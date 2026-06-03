@@ -130,7 +130,14 @@ export function useCommands(): { commands: CommandDef[]; run: (id: string) => vo
             notify.info("No active connection");
             return;
           }
-          ts().openGraph(conn);
+          // From a table tab, open the graph focused on that table (depth 1);
+          // otherwise open the whole-schema graph.
+          const active = ts().tabs.find((t) => t.id === ts().activeId);
+          if (active?.kind === "table" && active.table) {
+            ts().openGraph(conn, active.schema, active.table, active.schema);
+          } else {
+            ts().openGraph(conn);
+          }
         },
       },
       {

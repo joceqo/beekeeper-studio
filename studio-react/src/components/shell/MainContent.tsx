@@ -43,7 +43,13 @@ export function MainContent() {
 
   if (tab.kind === "graph") {
     return (
-      <SchemaGraphView key={tab.id} connectionId={tab.connectionId!} schema={tab.schema} />
+      <SchemaGraphView
+        key={tab.id}
+        connectionId={tab.connectionId!}
+        schema={tab.schema}
+        rootTable={tab.rootTable}
+        rootSchema={tab.rootSchema}
+      />
     );
   }
 
