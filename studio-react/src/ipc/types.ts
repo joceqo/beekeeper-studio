@@ -297,4 +297,21 @@ export interface BackendClient {
    * unavailable so the grid degrades to dataType-based inference.
    */
   getTableStats(params: GetTableStatsParams): Promise<TableStats>;
+  /**
+   * Live status of the in-app MCP server, for the status-bar popover. Best-effort:
+   * the HTTP/mock backends return a minimal/stubbed status.
+   */
+  getMcpStatus(): Promise<McpStatus>;
+}
+
+/** Live MCP server status (mirrors the backend `mcp/status` handler). */
+export interface McpStatus {
+  running: boolean;
+  url: string | null;
+  port: number | null;
+  requests: number;
+  errors: number;
+  lastCall: { name: string; durationMs: number } | null;
+  /** Names of saved connections whose AI access is 'write'. */
+  writeConnections: string[];
 }

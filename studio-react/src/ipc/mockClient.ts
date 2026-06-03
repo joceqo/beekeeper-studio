@@ -8,6 +8,7 @@ import type {
   GetSchemaGraphOptions,
   GetTableStatsParams,
   IncomingForeignKey,
+  McpStatus,
   PageRelationCounts,
   PageRelationCountsParams,
   QueryResult,
@@ -384,6 +385,19 @@ export class MockBackendClient implements BackendClient {
     const columns =
       params.table === "users" ? USERS_COLUMNS : genericColumns(params.table);
     return { columns: columns.map((c) => mockColumnStats(params.table, c)) };
+  }
+
+  async getMcpStatus(): Promise<McpStatus> {
+    await delay(jitter(20, 60));
+    return {
+      running: true,
+      url: "http://127.0.0.1:27500/mcp",
+      port: 27500,
+      requests: 15,
+      errors: 0,
+      lastCall: { name: "list_tables", durationMs: 12 },
+      writeConnections: ["postgres"],
+    };
   }
 
   async getRecords(params: GetRecordsParams): Promise<RecordPage> {

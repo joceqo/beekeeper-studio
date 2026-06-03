@@ -10,6 +10,7 @@ import { MainContent } from "@/components/shell/MainContent";
 import { StatusBar } from "@/components/shell/StatusBar";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { ActivityPanel } from "@/components/activity/ActivityPanel";
+import { ActivityDrawer } from "@/components/activity/ActivityDrawer";
 import { DetailHostProvider, useDetailHost } from "@/components/shell/DetailDock";
 import { useLayoutStore } from "@/store/layout";
 import { useTabsStore } from "@/store/tabs";
@@ -25,14 +26,6 @@ function HResize() {
   return (
     <PanelResizeHandle className="group relative w-px shrink-0 bg-border outline-none data-[resize-handle-state=drag]:bg-accent">
       <span className="absolute inset-y-0 -left-1 -right-1 group-hover:bg-accent/40 group-data-[resize-handle-state=drag]:bg-accent/40" />
-    </PanelResizeHandle>
-  );
-}
-
-function VResize() {
-  return (
-    <PanelResizeHandle className="group relative h-px shrink-0 bg-border outline-none data-[resize-handle-state=drag]:bg-accent">
-      <span className="absolute inset-x-0 -top-1 -bottom-1 group-hover:bg-accent/40 group-data-[resize-handle-state=drag]:bg-accent/40" />
     </PanelResizeHandle>
   );
 }
@@ -85,10 +78,6 @@ export default function App() {
     (r: ImperativePanelHandle | null) => registerPanel("detail", r),
     [registerPanel]
   );
-  const activityRef = useCallback(
-    (r: ImperativePanelHandle | null) => registerPanel("activity", r),
-    [registerPanel]
-  );
 
   return (
     <TooltipProvider delay={300}>
@@ -96,71 +85,59 @@ export default function App() {
         <div className="flex h-screen w-screen flex-col overflow-hidden bg-bg-primary text-text-primary">
           <TitleBar />
 
-          {/* horizontal: sidebar | main | detail dock */}
-          <PanelGroup
-            direction="horizontal"
-            autoSaveId="studio-react.layout.horizontal"
-            className="min-h-0 flex-1"
-          >
-            <Panel
-              id="sidebar"
-              order={1}
-              ref={sidebarRef}
-              collapsible
-              collapsedSize={3}
-              defaultSize={sidebarCollapsed ? 3 : 18}
-              minSize={12}
-              maxSize={32}
-              onCollapse={() => setCollapsed("sidebar", true)}
-              onExpand={() => setCollapsed("sidebar", false)}
+          {/* content area: sidebar | main | detail (detail full-height). The
+              activity log opens as a full-width overlay anchored to the bottom
+              of this region, above the always-visible activity tab bar. */}
+          <div className="relative min-h-0 flex-1">
+            <PanelGroup
+              direction="horizontal"
+              autoSaveId="studio-react.layout.horizontal"
+              className="h-full"
             >
-              <Sidebar />
-            </Panel>
+              <Panel
+                id="sidebar"
+                order={1}
+                ref={sidebarRef}
+                collapsible
+                collapsedSize={3}
+                defaultSize={sidebarCollapsed ? 3 : 18}
+                minSize={12}
+                maxSize={32}
+                onCollapse={() => setCollapsed("sidebar", true)}
+                onExpand={() => setCollapsed("sidebar", false)}
+              >
+                <Sidebar />
+              </Panel>
 
-            <HResize />
+              <HResize />
 
-            <Panel id="main" order={2} minSize={30}>
-              {/* vertical: grid/editor | activity log */}
-              <PanelGroup direction="vertical" autoSaveId="studio-react.layout.vertical">
-                <Panel id="content" order={1} minSize={20}>
-                  <MainContent />
-                </Panel>
+              <Panel id="main" order={2} minSize={30}>
+                <MainContent />
+              </Panel>
 
-                <VResize />
+              <HResize />
 
-                <Panel
-                  id="activity"
-                  order={2}
-                  ref={activityRef}
-                  collapsible
-                  collapsedSize={4}
-                  defaultSize={activityCollapsed ? 4 : 28}
-                  minSize={12}
-                  onCollapse={() => setCollapsed("activity", true)}
-                  onExpand={() => setCollapsed("activity", false)}
-                >
-                  <ActivityPanel />
-                </Panel>
-              </PanelGroup>
-            </Panel>
+              <Panel
+                id="detail"
+                order={3}
+                ref={detailRef}
+                collapsible
+                collapsedSize={0}
+                defaultSize={detailCollapsed ? 0 : 22}
+                minSize={14}
+                maxSize={40}
+                onCollapse={() => setCollapsed("detail", true)}
+                onExpand={() => setCollapsed("detail", false)}
+              >
+                <div ref={setDetailHost} className="h-full" />
+              </Panel>
+            </PanelGroup>
 
-            <HResize />
+            {!activityCollapsed && <ActivityDrawer />}
+          </div>
 
-            <Panel
-              id="detail"
-              order={3}
-              ref={detailRef}
-              collapsible
-              collapsedSize={0}
-              defaultSize={detailCollapsed ? 0 : 22}
-              minSize={14}
-              maxSize={40}
-              onCollapse={() => setCollapsed("detail", true)}
-              onExpand={() => setCollapsed("detail", false)}
-            >
-              <div ref={setDetailHost} className="h-full" />
-            </Panel>
-          </PanelGroup>
+          {/* full-width activity tab bar — always visible, toggles the drawer */}
+          <ActivityPanel />
 
           <StatusBar />
         </div>

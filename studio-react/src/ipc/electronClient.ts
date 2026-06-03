@@ -8,6 +8,7 @@ import type {
   GetSchemaGraphOptions,
   GetTableStatsParams,
   IncomingForeignKey,
+  McpStatus,
   PageRelationCounts,
   PageRelationCountsParams,
   QueryResult,
@@ -499,6 +500,10 @@ export class ElectronBackendClient implements BackendClient {
     // Best-effort: no dedicated handler. Degrade to empty so the grid falls back
     // to dataType-based semantic inference.
     return { columns: [] };
+  }
+
+  async getMcpStatus(): Promise<McpStatus> {
+    return this.send<McpStatus>("mcp/status", {});
   }
 
   async getSchemaGraph(

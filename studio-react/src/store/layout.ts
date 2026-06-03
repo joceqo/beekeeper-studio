@@ -16,6 +16,11 @@ type PanelKey = "sidebar" | "detail" | "activity";
 
 const COLLAPSED_KEY = (k: PanelKey) => `studio-react.layout.${k}.collapsed`;
 
+/** Activity drawer height bounds, mirroring SlashTable's log panel (min/max). */
+export const ACTIVITY_MIN_H = 80;
+export const ACTIVITY_MAX_H = 600;
+const ACTIVITY_HEIGHT_KEY = "studio-react.layout.activity.height";
+
 function readCollapsed(k: PanelKey, fallback: boolean): boolean {
   try {
     const raw = localStorage.getItem(COLLAPSED_KEY(k));
@@ -33,10 +38,26 @@ function writeCollapsed(k: PanelKey, v: boolean) {
   }
 }
 
+function clampHeight(v: number): number {
+  return Math.min(ACTIVITY_MAX_H, Math.max(ACTIVITY_MIN_H, Math.round(v)));
+}
+
+function readActivityHeight(fallback: number): number {
+  try {
+    const raw = localStorage.getItem(ACTIVITY_HEIGHT_KEY);
+    return raw == null ? fallback : clampHeight(Number(raw));
+  } catch {
+    return fallback;
+  }
+}
+
 interface LayoutState {
   sidebarCollapsed: boolean;
   detailCollapsed: boolean;
   activityCollapsed: boolean;
+
+  /** Activity drawer height in px (overlay, not a resizable Panel). */
+  activityHeight: number;
 
   sidebarRef: ImperativePanelHandle | null;
   detailRef: ImperativePanelHandle | null;
@@ -47,12 +68,15 @@ interface LayoutState {
   setCollapsed: (key: PanelKey, collapsed: boolean) => void;
   /** Imperatively collapse/expand a panel (wired to the toolbar toggles). */
   toggle: (key: PanelKey) => void;
+  /** Resize the activity drawer (clamped + persisted). */
+  setActivityHeight: (h: number) => void;
 }
 
 export const useLayoutStore = create<LayoutState>((set, get) => ({
   sidebarCollapsed: readCollapsed("sidebar", false),
   detailCollapsed: readCollapsed("detail", false),
   activityCollapsed: readCollapsed("activity", true),
+  activityHeight: readActivityHeight(300),
 
   sidebarRef: null,
   detailRef: null,
@@ -76,5 +100,15 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
     }
     if (collapsed) ref.expand();
     else ref.collapse();
+  },
+
+  setActivityHeight: (h) => {
+    const clamped = clampHeight(h);
+    try {
+      localStorage.setItem(ACTIVITY_HEIGHT_KEY, String(clamped));
+    } catch {
+      /* ignore */
+    }
+    set({ activityHeight: clamped });
   },
 }));

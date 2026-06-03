@@ -7,6 +7,7 @@ import type {
   GetRelationCountsParams,
   GetSchemaGraphOptions,
   GetTableStatsParams,
+  McpStatus,
   PageRelationCounts,
   PageRelationCountsParams,
   QueryResult,
@@ -507,6 +508,26 @@ export class McpBackendClient implements BackendClient {
     } catch {
       return { columns: [] };
     }
+  }
+
+  async getMcpStatus(): Promise<McpStatus> {
+    // HTTP backend: no IPC status handler. Report a best-effort status derived
+    // from the endpoint we talk to (no live request stats over the wire).
+    let port: number | null = null;
+    try {
+      port = Number(new URL(this.baseUrl).port) || null;
+    } catch {
+      /* ignore */
+    }
+    return {
+      running: true,
+      url: this.baseUrl,
+      port,
+      requests: 0,
+      errors: 0,
+      lastCall: null,
+      writeConnections: [],
+    };
   }
 
   async getRecords(params: GetRecordsParams): Promise<RecordPage> {

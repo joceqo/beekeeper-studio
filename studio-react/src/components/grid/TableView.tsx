@@ -371,7 +371,12 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
               rows={page.rows}
               sort={sort}
               onSort={onSort}
-              onRowSelect={(i) => selectRow(tabId, i)}
+              onRowSelect={(i) => {
+                selectRow(tabId, i);
+                // Selecting a row reveals it in the ROW detail dock (auto-expand
+                // if collapsed), mirroring SlashTable's publishRowDetail().
+                if (i != null) openDock();
+              }}
               onColumnSelect={(name) => selectColumn(tabId, name)}
               relations={relations}
               relationCounts={relationCounts}

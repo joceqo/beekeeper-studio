@@ -46,8 +46,12 @@ function token(name: string): string {
 
 function glideTheme(): Partial<Theme> {
   return {
-    accentColor: token("--color-accent"),
-    accentLight: token("--color-accent-subtle"),
+    // Active-cell border: a bright, full-opacity accent so the clicked cell has
+    // a clearly colored outline (Glide draws the active-cell ring with this).
+    accentColor: token("--color-accent-hover"),
+    // Selection fill kept light (~15% alpha) so the bright border reads as a
+    // distinct outline rather than blending into a solid block.
+    accentLight: token("--color-accent") + "26",
     textDark: token("--color-text-primary"),
     textMedium: token("--color-text-secondary"),
     textLight: token("--color-text-muted"),
@@ -622,7 +626,7 @@ export function DataGrid({
         getCellContent={getCellContent}
         columns={gridColumns}
         rows={rows.length}
-        rowMarkers="number"
+        rowMarkers="none"
         rowHeight={30}
         headerHeight={32}
         smoothScrollX

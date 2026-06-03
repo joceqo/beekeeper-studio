@@ -7,8 +7,25 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { createTools, McpTool, ToolDeps } from "./tools";
 import { McpAccess } from "./sqlGuard";
+import { SavedConnection } from "@/common/appdb/models/saved_connection";
+import { normalizeMcpAccess } from "./access";
 
 const log = rawLog.scope("McpServer");
+
+/** Live MCP server status, surfaced to the renderer's status-bar popover. */
+export interface McpStatus {
+  running: boolean;
+  url: string | null;
+  port: number | null;
+  requests: number;
+  errors: number;
+  lastCall: { name: string; durationMs: number } | null;
+  /** Names of saved connections whose AI access is 'write'. */
+  writeConnections: string[];
+}
+
+/** Records one tool invocation's outcome into the server's running stats. */
+type ToolCallRecorder = (name: string, durationMs: number, isError: boolean) => void;
 
 export interface McpServerOptions {
   /** Port to bind. 0 = ephemeral. SlashTable uses a fixed loopback port. */
@@ -23,19 +40,27 @@ export interface McpServerOptions {
 }
 
 /** Build a fresh McpServer with every tool registered. One per client session. */
-function buildServer(tools: McpTool[], name: string, version: string): McpServer {
+function buildServer(
+  tools: McpTool[],
+  name: string,
+  version: string,
+  record: ToolCallRecorder
+): McpServer {
   const server = new McpServer({ name, version });
   for (const tool of tools) {
     server.registerTool(
       tool.name,
       { description: tool.description, inputSchema: tool.inputSchema },
       (async (args: Record<string, unknown>) => {
+        const start = Date.now();
         log.info(`tool call: ${tool.name}`, args);
         try {
           const result = await tool.handler(args);
+          record(tool.name, Date.now() - start, !!result.isError);
           log.info(`tool ok: ${tool.name}${result.isError ? " (isError)" : ""}`);
           return result;
         } catch (err) {
+          record(tool.name, Date.now() - start, true);
           log.warn(`tool ${tool.name} failed`, err);
           return {
             content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],
@@ -63,14 +88,56 @@ export class BeekeeperMcpServer {
   private readonly port: number;
   private readonly name: string;
   private readonly version: string;
+  private readonly defaultAccess: McpAccess;
+  /** Running request stats, surfaced via getStatus(). */
+  private requests = 0;
+  private errors = 0;
+  private lastCall: { name: string; durationMs: number } | null = null;
 
   constructor(opts: McpServerOptions = {}) {
     this.host = opts.host ?? "127.0.0.1";
     this.port = opts.port ?? 0;
     this.name = opts.name ?? "beekeeper-studio";
     this.version = opts.version ?? "0.0.0";
-    const deps: ToolDeps = { defaultAccess: opts.defaultAccess ?? "read" };
+    this.defaultAccess = opts.defaultAccess ?? "read";
+    const deps: ToolDeps = { defaultAccess: this.defaultAccess };
     this.tools = createTools(deps);
+  }
+
+  /** Tally one tool invocation (called from the per-session server wrapper). */
+  private recordToolCall: ToolCallRecorder = (name, durationMs, isError) => {
+    this.requests += 1;
+    if (isError) this.errors += 1;
+    this.lastCall = { name, durationMs };
+  };
+
+  /** Resolved bound port once started, else null. */
+  get boundPort(): number | null {
+    if (!this.httpServer) return null;
+    const addr = this.httpServer.address() as AddressInfo | null;
+    return addr?.port ?? null;
+  }
+
+  /** Live status for the renderer's MCP popover. */
+  async getStatus(): Promise<McpStatus> {
+    let writeConnections: string[] = [];
+    try {
+      const saved = await SavedConnection.find();
+      writeConnections = saved
+        .filter((c) => normalizeMcpAccess(c.mcpAccess, this.defaultAccess) === "write")
+        .map((c) => c.name);
+    } catch (err) {
+      log.warn("getStatus: failed to read saved connections", err);
+    }
+    return {
+      running: !!this.httpServer,
+      url: this.url,
+      port: this.boundPort,
+      requests: this.requests,
+      errors: this.errors,
+      lastCall: this.lastCall,
+      writeConnections,
+    };
   }
 
   /** Resolved URL once started, e.g. http://127.0.0.1:27420/mcp */
@@ -185,7 +252,7 @@ export class BeekeeperMcpServer {
             log.info(`MCP session closed: ${transport!.sessionId}`);
           }
         };
-        const server = buildServer(this.tools, this.name, this.version);
+        const server = buildServer(this.tools, this.name, this.version, this.recordToolCall);
         await server.connect(transport);
         log.info("new MCP session initializing");
       }
