@@ -4,7 +4,7 @@ import {
   Eye,
   EyeOff,
   X,
-  Pencil,
+  Maximize2,
   RotateCcw,
   Plus,
   Trash2,
@@ -406,9 +406,9 @@ function FieldEditor({
     return <ArrayEditor value={value} onChange={onChange} />;
   }
 
-  // json / code → popout dialog editor with a pencil button.
+  // json / code → mono inline + popout dialog editor.
   if (sem === "json" || sem === "code") {
-    return <JsonEditor column={column} value={value} onChange={onChange} />;
+    return <ValueEditor column={column} value={value} onChange={onChange} mono />;
   }
 
   // color → swatch + hex input.
@@ -432,15 +432,8 @@ function FieldEditor({
     );
   }
 
-  // text default.
-  return (
-    <Input
-      size="sm"
-      value={value === null || value === undefined ? "" : String(value)}
-      placeholder="NULL"
-      onChange={(e) => onChange(e.target.value)}
-    />
-  );
+  // text default → inline input + popout editor (matches SlashTable).
+  return <ValueEditor column={column} value={value} onChange={onChange} />;
 }
 
 /** Simple multi-value array editor: one Input per element + add/remove. */
@@ -553,52 +546,56 @@ function HighlightedJson({ value, limit = 120 }: { value: string; limit?: number
   return <>{out}</>;
 }
 
-function JsonEditor({
+/**
+ * Inline value editor with a popout modal — mirrors SlashTable's EditorBody
+ * (inline edit, Maximize-to-modal, Set NULL). `mono` renders a syntax-highlighted
+ * preview inline for json/code; plain text edits directly in the inline input.
+ */
+function ValueEditor({
   column,
   value,
   onChange,
+  mono = false,
 }: {
   column: ColumnDef;
   value: CellValue;
   onChange: (value: CellValue) => void;
+  mono?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const text = value === null || value === undefined ? "" : String(value);
+  const isNull = value === null || value === undefined;
+  const text = isNull ? "" : String(value);
   const [draft, setDraft] = useState(text);
   const [jsonError, setJsonError] = useState<string | null>(null);
-  // Inline entry for an empty value: local state, committed on blur, so an empty
-  // JSON/code field is a typeable input (not a static "NULL"). Local state keeps
-  // focus while typing (the parent value stays null until blur).
-  const [emptyDraft, setEmptyDraft] = useState("");
+  // Show the highlighted preview only for non-empty json/code; otherwise edit
+  // directly in the inline input.
+  const showPreview = mono && text !== "";
 
   return (
     <div className="flex items-start gap-1">
-      {text === "" ? (
-        <Input
-          size="sm"
-          className="min-w-0 flex-1 font-mono"
-          placeholder="NULL"
-          value={emptyDraft}
-          onChange={(e) => setEmptyDraft(e.target.value)}
-          onBlur={() => {
-            if (emptyDraft !== "") onChange(emptyDraft);
-          }}
-        />
-      ) : (
+      {showPreview ? (
         <code className="min-w-0 flex-1 break-words rounded-sm bg-bg-secondary px-1.5 py-1 font-mono text-xs text-text-secondary">
           <HighlightedJson value={text} limit={120} />
         </code>
+      ) : (
+        <Input
+          size="sm"
+          className={cn("min-w-0 flex-1", mono && "font-mono")}
+          placeholder="NULL"
+          value={text}
+          onChange={(e) => onChange(e.target.value)}
+        />
       )}
       <IconButton
         aria-label={`Edit ${column.name}`}
-        title="Edit value"
+        title="Edit in a larger editor"
         onClick={() => {
           setDraft(text);
           setJsonError(null);
           setOpen(true);
         }}
       >
-        <Pencil size={12} />
+        <Maximize2 size={12} />
       </IconButton>
       <Dialog
         open={open}
@@ -607,6 +604,17 @@ function JsonEditor({
         description={column.dataType}
         footer={
           <>
+            <Button
+              variant="subtle"
+              size="sm"
+              className="mr-auto"
+              onClick={() => {
+                onChange(null);
+                setOpen(false);
+              }}
+            >
+              Set NULL
+            </Button>
             <Button variant="subtle" size="sm" onClick={() => setOpen(false)}>
               Cancel
             </Button>
