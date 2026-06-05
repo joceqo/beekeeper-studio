@@ -32,6 +32,7 @@ import {
 import type { CellValue, ColumnDef } from "@/ipc";
 import { useRelationCounts } from "./useRelationCounts";
 import { useM2MRelations } from "./useM2MRelations";
+import { useColumnFill } from "./useColumnFill";
 import { IconButton, Button, Tooltip } from "@/ui";
 
 interface Props {
@@ -237,6 +238,21 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
     pageKey,
   });
 
+  // Per-column completeness (fill rate) → 3-bar header glyph. Accumulates from
+  // loaded pages (only when unfiltered, so the estimate stays unbiased) and is
+  // upgraded by a whole-table TABLESAMPLE on Postgres. See useColumnFill.
+  const fill = useColumnFill({
+    connectionId,
+    schema,
+    table,
+    columns: page?.columns ?? [],
+    rows: page?.rows ?? [],
+    totalRows: page?.totalRows ?? null,
+    pkIndex: page?.columns.findIndex((c) => c.primaryKey) ?? -1,
+    pageSig: pageKey,
+    active: !where,
+  });
+
   // Drill into related rows: open a new relation tab with a breadcrumb path.
   const onRelationClick = useCallback(
     (rowIndex: number, rel: RelationColumn) => {
@@ -388,6 +404,7 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
               onHideColumn={onHideColumn}
               onConfigureColumn={onConfigureColumn}
               stats={stats}
+              fill={fill}
             />
           ) : null}
         </div>
@@ -406,6 +423,7 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
               mode={selection.mode}
               description={description}
               stats={stats}
+              fill={fill}
               onClose={() => {
                 clearSelection(tabId);
                 toggleDock();

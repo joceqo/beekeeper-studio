@@ -313,7 +313,10 @@ export const useTabsStore = create<TabsState>((set, get) => ({
       id: nextId("query"),
       kind: "query",
       title: `Query ${n}`,
-      sql: "SELECT id, email, username, plan\nFROM public.users\nWHERE is_active = true\nORDER BY created_at DESC\nLIMIT 50;",
+      // Harmless starter (matches SlashTable's new-tab seed): a comment + a stub
+      // the user completes. The old demo query referenced mock-only columns
+      // (plan/is_active/created_at) and errored against real databases.
+      sql: "-- Query public schema\nSELECT * FROM ",
     };
     set((s) => ({ tabs: [...s.tabs, tab], activeId: tab.id }));
   },

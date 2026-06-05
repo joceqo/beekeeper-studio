@@ -1,6 +1,7 @@
 import { X, Plus, Table2, FileCode, Database, Workflow, Spline } from "lucide-react";
 import { useTabsStore, type Tab } from "@/store/tabs";
-import { cn, IconButton, Tooltip } from "@/ui";
+import { useCommands } from "@/lib/commands";
+import { cn, IconButton, Menu } from "@/ui";
 
 function TabIcon({ kind }: { kind: Tab["kind"] }) {
   if (kind === "query") return <FileCode size={12} />;
@@ -15,7 +16,7 @@ export function TabStrip() {
   const activeId = useTabsStore((s) => s.activeId);
   const setActive = useTabsStore((s) => s.setActive);
   const close = useTabsStore((s) => s.close);
-  const openQuery = useTabsStore((s) => s.openQuery);
+  const { run } = useCommands();
 
   return (
     <div className="flex min-w-0 flex-1 items-center">
@@ -55,16 +56,38 @@ export function TabStrip() {
           );
         })}
       </div>
-      <Tooltip content="New query tab">
-        <IconButton
-          size="lg"
-          onClick={openQuery}
-          aria-label="New query tab"
-          className="ml-0.5 h-8 w-8 shrink-0 rounded-none text-text-muted"
-        >
-          <Plus size={15} />
-        </IconButton>
-      </Tooltip>
+      <Menu
+        align="start"
+        trigger={
+          <IconButton
+            size="lg"
+            aria-label="New tab"
+            className="ml-0.5 h-8 w-8 shrink-0 rounded-none text-text-muted"
+          >
+            <Plus size={15} />
+          </IconButton>
+        }
+        items={[
+          {
+            label: "Explorer Tab",
+            kbd: "⌘⇧E",
+            icon: <Table2 size={14} />,
+            onSelect: () => run("core.new-explorer-tab"),
+          },
+          {
+            label: "Graph Tab",
+            kbd: "⌘⇧G",
+            icon: <Workflow size={14} />,
+            onSelect: () => run("core.schema-graph"),
+          },
+          {
+            label: "SQL Tab",
+            kbd: "⌘T",
+            icon: <FileCode size={14} />,
+            onSelect: () => run("core.new-sql-tab"),
+          },
+        ]}
+      />
     </div>
   );
 }

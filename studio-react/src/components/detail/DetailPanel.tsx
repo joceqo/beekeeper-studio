@@ -30,6 +30,7 @@ import {
   editKey,
   type PendingEdit,
 } from "@/store/pendingEdits";
+import { fillBars, type FillInfo } from "@/store/fillStats";
 import {
   cn,
   IconButton,
@@ -58,6 +59,8 @@ interface Props {
   description: TableDescription | null;
   /** Per-column value stats, for inferred semantic type shown in the TypePicker. */
   stats?: Map<string, ColumnStats>;
+  /** Per-column completeness (fill rate), shown in the column detail. */
+  fill?: Map<string, FillInfo>;
   onClose: () => void;
 }
 
@@ -97,6 +100,7 @@ export function DetailPanel({
   mode,
   description,
   stats,
+  fill,
   onClose,
 }: Props) {
   const openTable = useTabsStore((s) => s.openTable);
@@ -130,6 +134,7 @@ export function DetailPanel({
         columnName={columnName}
         fkRef={fks.get(columnName) ?? null}
         stats={stats?.get(columnName)}
+        fill={fill?.get(columnName)}
       />
     );
   } else if (mode === "row" && row) {
@@ -352,11 +357,25 @@ function FieldEditor({
     return <FkLink value={value} reference={fkRef} onFollowFk={onFollowFk} />;
   }
 
+  // Read-only (e.g. a table with no primary key): still render an input per
+  // field so empty/NULL values show as an (empty) box instead of a blank gap —
+  // it just can't be typed into. The "read-only" notice lives in the header.
   if (!editable) {
-    return value === null || value === undefined ? (
-      <NullValue />
-    ) : (
-      <span>{String(value)}</span>
+    const isNull = value === null || value === undefined;
+    const display = isNull ? "" : String(value);
+    // Distinguish NULL from an empty string '' — both render as an empty box,
+    // so the placeholder carries the distinction.
+    const placeholder = isNull ? "NULL" : display === "" ? "'' (empty)" : undefined;
+    return (
+      <Input
+        size="sm"
+        readOnly
+        tabIndex={-1}
+        title={isNull ? "NULL" : display === "" ? "empty string ''" : display}
+        value={display}
+        placeholder={placeholder}
+        className="cursor-default bg-bg-secondary text-text-secondary focus:border-border focus:ring-0"
+      />
     );
   }
 
@@ -869,18 +888,46 @@ function typeOptionLabel(type: SemanticType): React.ReactNode {
   );
 }
 
+/** Inline 3-bar fill glyph + label for the column detail (mirrors the header). */
+function CompletenessBars({ fill }: { fill: FillInfo }) {
+  const lit = fillBars(fill.ratio);
+  const pct = Math.round(fill.ratio * 100);
+  const basis =
+    fill.basis === "sample"
+      ? `~${pct}% filled · ${fill.seen}-row sample`
+      : `${pct}% filled · ${fill.filled}/${fill.seen} loaded`;
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex items-center gap-0.5" title={basis}>
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            className={cn("h-3 w-1", i < lit ? "bg-accent" : "bg-text-muted/30")}
+          />
+        ))}
+      </div>
+      <span className="font-mono text-text-secondary">{pct}%</span>
+      <span className="text-xs text-text-muted">
+        {fill.basis === "sample" ? "sampled" : `${fill.filled}/${fill.seen} loaded`}
+      </span>
+    </div>
+  );
+}
+
 function ColumnDetail({
   tabId,
   column,
   columnName,
   fkRef,
   stats,
+  fill,
 }: {
   tabId: string;
   column: ColumnDef | null;
   columnName: string;
   fkRef: string | null;
   stats?: ColumnStats;
+  fill?: FillInfo;
 }) {
   const config = useColumnConfigStore((s) => s.byKey[`${tabId}::${columnName}`]) ?? {
     format: "text" as ColumnFormat,
@@ -936,6 +983,17 @@ function ColumnDetail({
           </div>
         )}
       </dl>
+
+      {/* Completeness (fill rate) — how many rows have a non-null, non-empty
+          value. From a whole-table sample (Postgres) or the loaded rows. */}
+      {fill && (
+        <div>
+          <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-text-muted">
+            Completeness
+          </div>
+          <CompletenessBars fill={fill} />
+        </div>
+      )}
 
       {/* Semantic-type override (TypePicker). "Auto" uses the inferred type;
           "None" disables semantic rendering for this column. Persisted per

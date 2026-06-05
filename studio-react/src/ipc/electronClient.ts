@@ -303,6 +303,56 @@ export class ElectronBackendClient implements BackendClient {
         rowEstimate: 0,
       });
     }
+    // Enrich with cheap row estimates (planner stats — no count(*) scan), so the
+    // sidebar + schema-graph picker can show "~N rows".
+    const estimates = await this.fetchRowEstimates(connectionId, schema);
+    if (estimates.size) {
+      for (const t of out) {
+        const e = estimates.get(`${t.schema}.${t.name}`);
+        if (e != null) t.rowEstimate = e;
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Best-effort per-table row estimates from planner statistics — Postgres
+   * `pg_class.reltuples`, MySQL `information_schema.tables.table_rows`. Cheap
+   * (catalog lookup, no count(*)). Returns a `schema.name -> rows` map; resolves
+   * empty on any error or unsupported engine.
+   */
+  private async fetchRowEstimates(
+    connectionId: string,
+    schema?: string
+  ): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    const type = (this.savedById.get(connectionId)?.connectionType ?? "").toLowerCase();
+    const esc = (s: string) => s.replace(/'/g, "''");
+    try {
+      let sql: string | null = null;
+      if (type === "postgres" || type === "cockroachdb" || type === "redshift") {
+        const where = schema
+          ? `n.nspname = '${esc(schema)}'`
+          : `n.nspname NOT IN ('pg_catalog', 'information_schema')`;
+        sql =
+          `SELECT n.nspname AS schema, c.relname AS name, c.reltuples::bigint AS rows ` +
+          `FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace ` +
+          `WHERE c.relkind IN ('r', 'p', 'm') AND ${where}`;
+      } else if (type === "mysql" || type === "mariadb") {
+        const where = schema ? `table_schema = '${esc(schema)}'` : `table_schema = DATABASE()`;
+        sql =
+          "SELECT table_schema AS `schema`, table_name AS name, table_rows AS rows " +
+          `FROM information_schema.tables WHERE ${where}`;
+      }
+      if (!sql) return out;
+      const res = await this.runQuery(connectionId, sql);
+      for (const row of res.rows) {
+        const n = Number(row[2]);
+        out.set(`${String(row[0])}.${String(row[1])}`, Number.isFinite(n) && n > 0 ? n : 0);
+      }
+    } catch {
+      /* estimates are best-effort */
+    }
     return out;
   }
 

@@ -56,6 +56,34 @@ function TableIcon({ type }: { type: TableSummary["type"] }) {
   return <Table2 size={13} className="text-text-muted" />;
 }
 
+/** Copy text to the clipboard with a confirmation toast. */
+function copyToClipboard(text: string, label: string) {
+  const done = () => notify.success(`Copied ${label}`);
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).then(done, () => notify.error("Copy failed"));
+  } else {
+    done();
+  }
+}
+
+/** Right-click menu for a table row (matches SlashTable's table context menu). */
+function tableMenu(
+  t: TableSummary,
+  actions: {
+    onOpenTable: (t: TableSummary) => void;
+    onOpenGraph: (t: TableSummary) => void;
+  }
+): MenuEntry[] {
+  const qualified = `${t.schema}.${t.name}`;
+  return [
+    { label: "Open in New Tab", onSelect: () => actions.onOpenTable(t) },
+    { label: "Open Schema Graph", onSelect: () => actions.onOpenGraph(t) },
+    { type: "separator" },
+    { label: "Copy Name", onSelect: () => copyToClipboard(t.name, t.name) },
+    { label: "Copy Qualified Name", onSelect: () => copyToClipboard(qualified, qualified) },
+  ];
+}
+
 export function Sidebar() {
   const collapsed = useLayoutStore((s) => s.sidebarCollapsed);
   const toggle = () => useLayoutStore.getState().toggle("sidebar");
@@ -392,6 +420,9 @@ export function Sidebar() {
                       onOpenTable={(t) =>
                         activeConnectionId && openTable(activeConnectionId, t.schema, t.name)
                       }
+                      onOpenGraph={(t) =>
+                        activeConnectionId && openGraph(activeConnectionId, t.schema, t.name, t.schema)
+                      }
                     />
                   ))}
                 </div>
@@ -414,12 +445,14 @@ function ExplorerNodeRow({
   activeTable,
   onToggleGroup,
   onOpenTable,
+  onOpenGraph,
 }: {
   node: ExplorerNode;
   collapsedMap: Record<string, boolean>;
   activeTable: { schema: string; table: string } | null;
   onToggleGroup: (id: string) => void;
   onOpenTable: (t: TableSummary) => void;
+  onOpenGraph: (t: TableSummary) => void;
 }) {
   const isActiveTable = (t: TableSummary) =>
     !!activeTable && activeTable.schema === t.schema && activeTable.table === t.name;
@@ -428,19 +461,21 @@ function ExplorerNodeRow({
     const rows = formatRowEstimate(t.rowEstimate);
     const active = isActiveTable(t);
     return (
-      <button
-        className={cn(
-          "flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-md transition-colors duration-100 ease-out hover:bg-bg-hover",
-          active && "bg-accent-subtle"
-        )}
-        onClick={() => onOpenTable(t)}
-      >
-        <TableIcon type={t.type} />
-        <span className={cn("truncate", active ? "text-text-primary" : "text-text-secondary")}>
-          {t.name}
-        </span>
-        {rows && <span className="ml-auto text-xs tabular-nums text-text-muted">{rows}</span>}
-      </button>
+      <ContextMenu items={tableMenu(t, { onOpenTable, onOpenGraph })}>
+        <button
+          className={cn(
+            "flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-md transition-colors duration-100 ease-out hover:bg-bg-hover",
+            active && "bg-accent-subtle"
+          )}
+          onClick={() => onOpenTable(t)}
+        >
+          <TableIcon type={t.type} />
+          <span className={cn("truncate", active ? "text-text-primary" : "text-text-secondary")}>
+            {t.name}
+          </span>
+          {rows && <span className="ml-auto text-xs tabular-nums text-text-muted">{rows}</span>}
+        </button>
+      </ContextMenu>
     );
   }
 
@@ -470,20 +505,24 @@ function ExplorerNodeRow({
             const rows = formatRowEstimate(child.table.rowEstimate);
             const active = isActiveTable(child.table);
             return (
-              <button
+              <ContextMenu
                 key={`${child.table.schema}.${child.table.name}`}
-                className={cn(
-                  "flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-md transition-colors duration-100 ease-out hover:bg-bg-hover",
-                  active && "bg-accent-subtle"
-                )}
-                onClick={() => onOpenTable(child.table)}
+                items={tableMenu(child.table, { onOpenTable, onOpenGraph })}
               >
-                <TableIcon type={child.table.type} />
-                <span className={cn("truncate", active ? "text-text-primary" : "text-text-secondary")}>
-                  {child.table.name}
-                </span>
-                {rows && <span className="ml-auto text-xs tabular-nums text-text-muted">{rows}</span>}
-              </button>
+                <button
+                  className={cn(
+                    "flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-md transition-colors duration-100 ease-out hover:bg-bg-hover",
+                    active && "bg-accent-subtle"
+                  )}
+                  onClick={() => onOpenTable(child.table)}
+                >
+                  <TableIcon type={child.table.type} />
+                  <span className={cn("truncate", active ? "text-text-primary" : "text-text-secondary")}>
+                    {child.table.name}
+                  </span>
+                  {rows && <span className="ml-auto text-xs tabular-nums text-text-muted">{rows}</span>}
+                </button>
+              </ContextMenu>
             );
           })}
         </div>
