@@ -57,6 +57,29 @@ export interface ConnectionConfig {
   [k: string]: unknown;
 }
 
+/**
+ * A running Docker container hosting a database, detected on the host for
+ * one-click connect (mirrors SlashTable's Docker auto-detect). Sourced from the
+ * backend `docker/listContainers` handler; best-effort, so the list is empty
+ * when Docker is unavailable.
+ */
+export interface DockerContainer {
+  id: string;
+  /** Container name (leading slash stripped). */
+  name: string;
+  /** Image reference, e.g. "postgres:16". */
+  image: string;
+  /** Engine, mapped onto the same union as {@link Connection.kind}. */
+  kind: Connection["kind"];
+  /** Host the container is reachable on (localhost for published ports). */
+  host: string;
+  /** Published host port, or the engine default. */
+  port: number | null;
+  /** Raw status string, e.g. "Up 3 hours". */
+  status: string;
+  running: boolean;
+}
+
 export interface Schema {
   name: string;
   tableCount: number;
@@ -273,6 +296,12 @@ export interface GetSchemaGraphOptions {
  */
 export interface BackendClient {
   listConnections(): Promise<Connection[]>;
+  /**
+   * Running Docker DB containers detected on the host, for one-click connect.
+   * Best-effort: implementations resolve to `[]` (not reject) when Docker is
+   * unavailable, so the sidebar simply omits the Docker section.
+   */
+  listDockerContainers(): Promise<DockerContainer[]>;
   /**
    * Open/resolve a saved connection, mapping the UI connection id (e.g. a saved
    * id) to the live backend connectionId. Must be awaited before any

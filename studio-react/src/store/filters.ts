@@ -2,6 +2,7 @@ import { create } from "zustand";
 import {
   makeCondition,
   makeGroup,
+  type FilterCondition,
   type Combinator,
   type FilterGroup,
   type FilterNode,
@@ -84,7 +85,7 @@ interface FilterState {
   /** Get the root group for a tab (lazily initialised, not persisted until edited). */
   getRoot: (tabId: string) => FilterGroup;
   /** Add a condition leaf to the given group (defaults to the root). */
-  addCondition: (tabId: string, parentId?: string, column?: string) => void;
+  addCondition: (tabId: string, parentId?: string, column?: string) => FilterCondition;
   /** Add a nested group to the given group (defaults to the root). */
   addGroup: (tabId: string, parentId?: string) => void;
   /** Patch a node's fields (condition column/operator/value or group fields). */
@@ -123,11 +124,14 @@ export const useFilterStore = create<FilterState>((set, get) => ({
 
   getRoot: (tabId) => get().byTab[tabId] ?? freshRoot(),
 
-  addCondition: (tabId, parentId, column) =>
+  addCondition: (tabId, parentId, column) => {
+    const condition = makeCondition(column ?? "");
     commit(set, tabId, (root) => {
       const target = parentId ?? root.id;
-      return addChild(root, target, makeCondition(column ?? "")) as FilterGroup;
-    }),
+      return addChild(root, target, condition) as FilterGroup;
+    });
+    return condition;
+  },
 
   addGroup: (tabId, parentId) =>
     commit(set, tabId, (root) => {

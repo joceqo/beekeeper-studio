@@ -4,6 +4,7 @@ import type {
   ColumnDef,
   Connection,
   ConnectionConfig,
+  DockerContainer,
   GetRecordsParams,
   GetRelationCountsParams,
   GetSchemaGraphOptions,
@@ -108,6 +109,18 @@ interface NgQueryResultDTO {
   rows?: Record<string, unknown>[];
   rowCount?: number;
   affectedRows?: number;
+}
+
+/** apps/studio/src/handlers/dockerHandlers.ts DockerDbContainer. */
+interface DockerDbContainerDTO {
+  id: string;
+  name: string;
+  image: string;
+  driver: "postgres" | "mysql" | "mariadb" | "sqlserver";
+  host: string;
+  port: number | null;
+  status: string;
+  running: boolean;
 }
 
 function kindFor(connectionType: string): Connection["kind"] {
@@ -235,6 +248,26 @@ export class ElectronBackendClient implements BackendClient {
       });
     }
     return conns;
+  }
+
+  async listDockerContainers(): Promise<DockerContainer[]> {
+    try {
+      const raw = await this.send<DockerDbContainerDTO[]>("docker/listContainers", {});
+      return (raw ?? []).map((c) => ({
+        id: c.id,
+        name: c.name,
+        image: c.image,
+        // kindFor maps "mariadb" -> mysql so the UI's 4-engine union is honored.
+        kind: kindFor(c.driver),
+        host: c.host,
+        port: c.port,
+        status: c.status,
+        running: c.running,
+      }));
+    } catch {
+      // Docker unavailable / handler missing — degrade to no containers.
+      return [];
+    }
   }
 
   /**

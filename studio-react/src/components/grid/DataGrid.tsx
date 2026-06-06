@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import DataEditor, {
   CompactSelection,
   GridCell,
@@ -6,6 +6,7 @@ import DataEditor, {
   GridColumn,
   GridSelection,
   GridMouseEventArgs,
+  HeaderClickedEventArgs,
   Item,
   Rectangle,
   Theme,
@@ -225,7 +226,6 @@ export function DataGrid({
   columns,
   rows,
   sort,
-  onSort,
   onRowSelect,
   onColumnSelect,
   relations = [],
@@ -533,16 +533,35 @@ export function DataGrid({
     [visible, rows, columnConfig, relations, relationCounts, fkByColumn, semanticOf]
   );
 
+  const openHeaderMenu = useCallback(
+    (def: ColumnDef, bounds: Rectangle) => {
+      if (!hasHeaderMenu) return;
+      onColumnSelect?.(def.name);
+      setHeaderMenu({
+        column: def,
+        rect: { x: bounds.x, y: bounds.y + bounds.height, width: bounds.width },
+      });
+    },
+    [hasHeaderMenu, onColumnSelect]
+  );
+
   const onHeaderClicked = useCallback(
-    (colIndex: number) => {
-      // Relation columns aren't sortable data columns; ignore header clicks.
+    (colIndex: number, event?: HeaderClickedEventArgs) => {
+      // Relation columns aren't data columns; ignore header clicks.
       if (colIndex >= visible.length) return;
       const def = visible[colIndex]?.c;
       if (!def) return;
+      // A plain left-click opens the column menu (sort/filter/hide live inside it),
+      // matching the right-click / 2-finger gesture. Falls back to selecting the
+      // column when no menu actions are wired.
+      if (hasHeaderMenu && event?.bounds) {
+        event.preventDefault();
+        openHeaderMenu(def, event.bounds);
+        return;
+      }
       onColumnSelect?.(def.name);
-      if (onSort) onSort(def.name);
     },
-    [visible, onSort, onColumnSelect]
+    [visible, hasHeaderMenu, openHeaderMenu, onColumnSelect]
   );
 
   // Open the column-header context menu, anchored to the header cell's bounds
@@ -554,13 +573,20 @@ export function DataGrid({
       if (colIndex >= visible.length) return;
       const def = visible[colIndex]?.c;
       if (!def) return;
-      onColumnSelect?.(def.name);
-      setHeaderMenu({
-        column: def,
-        rect: { x: bounds.x, y: bounds.y + bounds.height, width: bounds.width },
-      });
+      openHeaderMenu(def, bounds);
     },
-    [hasHeaderMenu, visible, onColumnSelect]
+    [hasHeaderMenu, visible, openHeaderMenu]
+  );
+
+  // Right-click / 2-finger click on a header opens the same column menu.
+  const onHeaderContextMenu = useCallback(
+    (colIndex: number, event: HeaderClickedEventArgs) => {
+      event.preventDefault();
+      if (!hasHeaderMenu || colIndex >= visible.length) return;
+      const def = visible[colIndex]?.c;
+      if (def) openHeaderMenu(def, event.bounds);
+    },
+    [hasHeaderMenu, visible, openHeaderMenu]
   );
 
   // Build the menu entries for the focused header column.
@@ -757,6 +783,7 @@ export function DataGrid({
         gridSelection={gridSelection}
         onHeaderClicked={onHeaderClicked}
         onHeaderMenuClick={hasHeaderMenu ? onHeaderMenuClick : undefined}
+        onHeaderContextMenu={hasHeaderMenu ? onHeaderContextMenu : undefined}
         onCellClicked={onCellClicked}
         onItemHovered={onItemHovered}
         onGridSelectionChange={onGridSelectionChange}

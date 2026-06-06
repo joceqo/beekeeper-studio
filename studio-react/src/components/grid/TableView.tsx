@@ -21,6 +21,7 @@ import { DetailDockPortal } from "@/components/shell/DetailDock";
 import { useTabsStore, type DrilldownCrumb } from "@/store/tabs";
 import { useFilterStore } from "@/store/filters";
 import { useColumnConfigStore } from "@/store/columnConfig";
+import { useUiStore } from "@/store/ui";
 import { compileWhere } from "@/lib/filters";
 import {
   relationColumns,
@@ -79,9 +80,8 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
 
   // Column-header context-menu actions (Agent C).
   const addCondition = useFilterStore((s) => s.addCondition);
-  const updateNode = useFilterStore((s) => s.updateNode);
-  const getRoot = useFilterStore((s) => s.getRoot);
   const setColumnHidden = useColumnConfigStore((s) => s.setHidden);
+  const requestOpenFilter = useUiStore((s) => s.requestOpenFilter);
 
   // Virtual relation columns (outgoing parents + incoming children).
   const baseRelations = useMemo<RelationColumn[]>(
@@ -193,14 +193,10 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
   // existing filter tree is preserved.
   const onFilterColumn = useCallback(
     (column: ColumnDef) => {
-      const before = new Set(getRoot(tabId).children.map((c) => c.id));
-      addCondition(tabId, undefined, column.name);
-      // Default the new leaf to `is not null` so it contributes immediately and
-      // reads as an active filter the user can refine.
-      const after = getRoot(tabId).children.find((c) => !before.has(c.id));
-      if (after) updateNode(tabId, after.id, { operator: "is_not_null" });
+      const condition = addCondition(tabId, undefined, column.name);
+      requestOpenFilter({ tabId, nodeId: condition.id });
     },
-    [tabId, addCondition, updateNode, getRoot]
+    [tabId, addCondition, requestOpenFilter]
   );
 
   const onHideColumn = useCallback(

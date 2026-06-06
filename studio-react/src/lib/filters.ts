@@ -117,6 +117,34 @@ export function makeCondition(column = ""): FilterCondition {
   return { id: newId(), kind: "condition", column, operator: "equals", value: "" };
 }
 
+/** Flatten all condition leaves in display order. */
+export function listConditions(node: FilterNode | null): FilterCondition[] {
+  if (!node) return [];
+  if (node.kind === "condition") return [node];
+  return node.children.flatMap((child) => listConditions(child));
+}
+
+/** Short human-readable value for compact filter chips. */
+function formatChipValue(v: unknown): string {
+  if (v === null) return "NULL";
+  if (v === undefined || v === "") return "…";
+  if (Array.isArray(v)) return v.length > 0 ? v.join(", ") : "…";
+  return String(v);
+}
+
+/** Label for one condition in the compact chip bar. */
+export function conditionLabel(condition: FilterCondition): string {
+  const column = condition.column || "column";
+  const op = OP_LABELS[condition.operator];
+  if (NO_VALUE_OPS.has(condition.operator)) return `${column} ${op}`;
+  if (condition.operator === "between") {
+    return `${column} ${op} ${formatChipValue(condition.value)} and ${formatChipValue(
+      condition.value2
+    )}`;
+  }
+  return `${column} ${op} ${formatChipValue(condition.value)}`;
+}
+
 // --- escaping (mirrors lib/relations.ts) ------------------------------------
 
 /** Quote a SQL identifier (double-quote, doubling embedded quotes). */
@@ -178,6 +206,7 @@ function compileCondition(c: FilterCondition, dialect: string): string | null {
   if (!c.column) return null;
   const col = ident(c.column);
   const like = dialect === "postgres" ? "ILIKE" : "LIKE";
+  const hasValue = c.value !== undefined && c.value !== "";
 
   switch (c.operator) {
     case "is_null":
@@ -186,26 +215,36 @@ function compileCondition(c: FilterCondition, dialect: string): string | null {
       return `${col} IS NOT NULL`;
 
     case "equals":
+      if (!hasValue) return null;
       return `${col} = ${sqlLiteral(c.value)}`;
     case "not_equals":
+      if (!hasValue) return null;
       return `${col} <> ${sqlLiteral(c.value)}`;
 
     case "gt":
+      if (!hasValue) return null;
       return `${col} > ${sqlLiteral(c.value)}`;
     case "gte":
+      if (!hasValue) return null;
       return `${col} >= ${sqlLiteral(c.value)}`;
     case "lt":
+      if (!hasValue) return null;
       return `${col} < ${sqlLiteral(c.value)}`;
     case "lte":
+      if (!hasValue) return null;
       return `${col} <= ${sqlLiteral(c.value)}`;
 
     case "contains":
+      if (!hasValue) return null;
       return `${col} ${like} ${textLiteral(`%${escapeLikePattern(c.value)}%`)} ESCAPE '\\'`;
     case "not_contains":
+      if (!hasValue) return null;
       return `${col} NOT ${like} ${textLiteral(`%${escapeLikePattern(c.value)}%`)} ESCAPE '\\'`;
     case "starts_with":
+      if (!hasValue) return null;
       return `${col} ${like} ${textLiteral(`${escapeLikePattern(c.value)}%`)} ESCAPE '\\'`;
     case "ends_with":
+      if (!hasValue) return null;
       return `${col} ${like} ${textLiteral(`%${escapeLikePattern(c.value)}`)} ESCAPE '\\'`;
 
     case "between": {

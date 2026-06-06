@@ -5,6 +5,7 @@ import type {
   ColumnStats,
   Connection,
   ConnectionConfig,
+  DockerContainer,
   GetRecordsParams,
   GetRelationCountsParams,
   GetSchemaGraphOptions,
@@ -307,6 +308,33 @@ export class MockBackendClient implements BackendClient {
   async listConnections() {
     await delay(jitter(60, 160));
     return structuredClone(MOCK_CONNECTIONS);
+  }
+
+  async listDockerContainers(): Promise<DockerContainer[]> {
+    await delay(jitter(40, 120));
+    // Canned running containers so the Docker section renders in browser dev.
+    return [
+      {
+        id: "mock-pg",
+        name: "local-postgres",
+        image: "postgres:16",
+        kind: "postgres",
+        host: "localhost",
+        port: 5432,
+        status: "Up 2 hours",
+        running: true,
+      },
+      {
+        id: "mock-mysql",
+        name: "shop-mysql",
+        image: "mysql:8",
+        kind: "mysql",
+        host: "localhost",
+        port: 3307,
+        status: "Up 11 minutes",
+        running: true,
+      },
+    ];
   }
 
   async listSchemas(_connectionId: string) {

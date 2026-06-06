@@ -29,6 +29,7 @@ import { PluginManager } from '@/services/plugin';
 import PluginFileManager from '@/services/plugin/PluginFileManager';
 import { DriverDepHandlers } from '@/handlers/driverDepHandlers';
 import { McpHandlers } from '@/handlers/mcpHandlers';
+import { DockerHandlers } from '@/handlers/dockerHandlers';
 import { DriverDepManager, DriverDepFileManager, createDefaultRegistry } from '@/services/driverDeps';
 import type { DepPlatform, DepArch } from '@/services/driverDeps';
 import BksConfig from '@/common/bksConfig';
@@ -96,6 +97,7 @@ export const handlers: Handlers = {
   ...LockHandlers,
   ...FormatterPresetHandlers,
   ...McpHandlers(() => mcpServer),
+  ...DockerHandlers,
   ...(platformInfo.isDevelopment && DevHandlers),
 };
 

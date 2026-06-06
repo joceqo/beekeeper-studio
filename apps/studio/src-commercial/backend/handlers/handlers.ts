@@ -3,6 +3,7 @@ import { IGeneratorHandlers } from "@/handlers/generatorHandlers";
 import { IQueryHandlers } from "@/handlers/queryHandlers";
 import { ITempHandlers } from "@/handlers/tempHandlers";
 import { IMcpHandlers } from "@/handlers/mcpHandlers";
+import { IDockerHandlers } from "@/handlers/dockerHandlers";
 
 // commercial
 import { IConnectionHandlers } from "./connHandlers";
@@ -23,4 +24,5 @@ export interface Handlers
     IEnumHandlers,
     ITempHandlers,
     IAwsHandlers,
-    IMcpHandlers {}
+    IMcpHandlers,
+    IDockerHandlers {}
