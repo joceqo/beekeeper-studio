@@ -11,6 +11,7 @@ export function Toaster() {
     <SonnerToaster
       theme={theme}
       position="bottom-right"
+      closeButton
       toastOptions={{
         style: {
           background: "var(--color-bg-surface)",

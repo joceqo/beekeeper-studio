@@ -323,6 +323,9 @@ export class MockBackendClient implements BackendClient {
         port: 5432,
         status: "Up 2 hours",
         running: true,
+        username: "postgres",
+        password: "postgres",
+        database: "postgres",
       },
       {
         id: "mock-mysql",

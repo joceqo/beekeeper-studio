@@ -628,20 +628,27 @@ function StartTablePicker({
   const [tables, setTables] = useState<TableSummary[]>([]);
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setError(null);
     backend
       .connect(connectionId)
       .then((id) => backend.listTables(id, schema))
       .then((t) => !cancelled && setTables(t))
-      .catch(() => !cancelled && setTables([]))
+      .catch((e) => {
+        if (cancelled) return;
+        setTables([]);
+        setError(e instanceof Error ? e.message : String(e));
+      })
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [connectionId, schema]);
+  }, [connectionId, schema, attempt]);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -672,8 +679,18 @@ function StartTablePicker({
             <div className="flex items-center justify-center gap-2 py-8 text-md text-text-muted">
               <RefreshCw size={14} className="animate-spin" /> Loading tables…
             </div>
+          ) : error ? (
+            <div className="flex flex-col items-center gap-3 px-6 py-8 text-center">
+              <AlertTriangle size={18} className="text-danger" />
+              <div className="text-md text-text-secondary">{error}</div>
+              <Button size="sm" variant="subtle" onClick={() => setAttempt((n) => n + 1)}>
+                Retry
+              </Button>
+            </div>
           ) : filtered.length === 0 ? (
-            <div className="py-8 text-center text-md text-text-muted">No tables match.</div>
+            <div className="py-8 text-center text-md text-text-muted">
+              {tables.length === 0 ? "No tables in this connection." : "No tables match."}
+            </div>
           ) : (
             filtered.map((t) => {
               const rows = formatRowEstimate(t.rowEstimate);

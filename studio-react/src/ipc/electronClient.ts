@@ -121,6 +121,9 @@ interface DockerDbContainerDTO {
   port: number | null;
   status: string;
   running: boolean;
+  username?: string | null;
+  password?: string | null;
+  database?: string | null;
 }
 
 function kindFor(connectionType: string): Connection["kind"] {
@@ -263,6 +266,9 @@ export class ElectronBackendClient implements BackendClient {
         port: c.port,
         status: c.status,
         running: c.running,
+        username: c.username ?? null,
+        password: c.password ?? null,
+        database: c.database ?? null,
       }));
     } catch {
       // Docker unavailable / handler missing — degrade to no containers.
@@ -363,7 +369,7 @@ export class ElectronBackendClient implements BackendClient {
     const esc = (s: string) => s.replace(/'/g, "''");
     try {
       let sql: string | null = null;
-      if (type === "postgres" || type === "cockroachdb" || type === "redshift") {
+      if (type === "postgres" || type === "postgresql" || type === "cockroachdb" || type === "redshift") {
         const where = schema
           ? `n.nspname = '${esc(schema)}'`
           : `n.nspname NOT IN ('pg_catalog', 'information_schema')`;

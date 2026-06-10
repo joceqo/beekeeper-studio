@@ -62,7 +62,11 @@ const KIND_BADGE: Record<Connection["kind"], string> = {
   sqlserver: "MSSQL",
 };
 
-/** The backend client key + default credentials for one-click connecting a Docker container. */
+/**
+ * The backend client key + fallback credentials for one-click connecting a
+ * Docker container. Credentials detected from the container env (DockerContainer
+ * username/password/database) take precedence over these.
+ */
 const DOCKER_DEFAULTS: Record<
   Connection["kind"],
   { client: string; username: string; password: string; database: string }
@@ -301,44 +305,68 @@ export function Sidebar() {
 
   /**
    * One-click connect a detected Docker container: reuse an existing saved
-   * connection on the same host:port, otherwise create one with the engine's
-   * default credentials, then connect + open its first table. Auth failures
-   * surface as a toast (e.g. non-default Docker passwords).
+   * connection on the same host:port, otherwise create one using credentials
+   * detected from the container env (falling back to the engine defaults),
+   * then connect + open its first table. Auth failures surface as a toast.
    */
   const connectDockerContainer = async (dc: DockerContainer) => {
     const hostKey = `${dc.host}:${dc.port}`;
     const existing = connections.find((c) => c.host === hostKey);
-    if (existing) {
-      setActiveConnection(existing.id);
-      toggleConnection(existing.id);
-      return;
-    }
     setConnectingDocker((s) => new Set(s).add(dc.id));
     try {
-      const defaults = DOCKER_DEFAULTS[dc.kind];
-      let base: ConnectionConfig = {};
-      try {
-        base = await backend.newConnection();
-      } catch {
-        /* mock backends may not provide defaults */
+      let targetId: string;
+      if (existing) {
+        targetId = existing.id;
+      } else {
+        const defaults = DOCKER_DEFAULTS[dc.kind];
+        let base: ConnectionConfig = {};
+        try {
+          base = await backend.newConnection();
+        } catch {
+          /* mock backends may not provide defaults */
+        }
+        const config: ConnectionConfig = {
+          ...base,
+          name: dc.name,
+          connectionType: defaults.client,
+          host: dc.host,
+          port: dc.port,
+          defaultDatabase: dc.database ?? (defaults.database || null),
+          username: dc.username ?? (defaults.username || null),
+          password: dc.password ?? (defaults.password || null),
+        };
+        const saved = await backend.saveConnection(config);
+        refreshConnections();
+        targetId = saved.id;
       }
-      const config: ConnectionConfig = {
-        ...base,
-        name: dc.name,
-        connectionType: defaults.client,
-        host: dc.host,
-        port: dc.port,
-        defaultDatabase: defaults.database || null,
-        username: defaults.username || null,
-        password: defaults.password || null,
-      };
-      const saved = await backend.saveConnection(config);
-      refreshConnections();
-      setActiveConnection(saved.id);
-      const liveId = await backend.connect(saved.id);
+      setActiveConnection(targetId);
+      if (!expanded[targetId]) toggleConnection(targetId);
+      // Connect explicitly (the active-connection effect only fires on change,
+      // so re-clicking an already-active row must still retry the connection).
+      let liveId: string;
+      try {
+        liveId = await backend.connect(targetId);
+      } catch (e) {
+        // A linked connection may hold stale credentials (e.g. saved before
+        // container-env detection existed). Repair from the container env
+        // once and retry; if that also fails, surface the original flow's error.
+        if (!existing || dc.username == null) throw e;
+        const config = await backend.getConnectionConfig(targetId);
+        if (!config) throw e;
+        await backend.saveConnection({
+          ...config,
+          username: dc.username,
+          password: dc.password ?? config.password,
+          defaultDatabase: dc.database ?? config.defaultDatabase,
+        });
+        refreshConnections();
+        liveId = await backend.connect(targetId);
+        notify.info(`${existing.name}: credentials updated from the container env`);
+      }
+      markConnected(targetId);
       const dbTables = await backend.listTables(liveId);
       const first = dbTables.find((t) => t.type === "table") ?? dbTables[0];
-      if (first) openTable(saved.id, first.schema, first.name);
+      if (first) openTable(targetId, first.schema, first.name);
       notify.success(`Connected to ${dc.name}`);
     } catch (e) {
       notify.error(e instanceof Error ? e.message : String(e));
@@ -360,9 +388,24 @@ export function Sidebar() {
   }) => {
     const connecting = connectingDocker.has(dc.id);
     const matchConnected = match ? connectedIds.has(match.id) : false;
+    const hostPort = dc.port != null ? `${dc.host}:${dc.port}` : dc.host;
+    const menu: MenuEntry[] = [
+      { label: "Connect", onSelect: () => void connectDockerContainer(dc) },
+      ...(match
+        ? [
+            {
+              label: "Edit Linked Connection…",
+              icon: <Pencil size={13} />,
+              onSelect: () => openConnection(match.id),
+            } satisfies MenuEntry,
+          ]
+        : []),
+      { type: "separator" },
+      { label: "Copy Host", onSelect: () => copyToClipboard(hostPort, hostPort) },
+    ];
     return (
+      <ContextMenu key={dc.id} items={menu}>
       <button
-        key={dc.id}
         title={`${dc.image} · ${dc.status}${match ? ` · linked to ${match.name}` : ""}`}
         disabled={connecting}
         className="flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left font-mono text-md text-text-secondary transition-colors duration-100 ease-out hover:bg-bg-hover disabled:opacity-60"
@@ -389,6 +432,7 @@ export function Sidebar() {
           />
         )}
       </button>
+      </ContextMenu>
     );
   };
 

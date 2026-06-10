@@ -78,6 +78,10 @@ export interface DockerContainer {
   /** Raw status string, e.g. "Up 3 hours". */
   status: string;
   running: boolean;
+  /** Credentials detected from the container env (best-effort, may be absent). */
+  username?: string | null;
+  password?: string | null;
+  database?: string | null;
 }
 
 export interface Schema {

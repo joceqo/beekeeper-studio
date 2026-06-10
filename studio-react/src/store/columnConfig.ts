@@ -10,7 +10,9 @@ export type SemanticOverride = SemanticType | "none";
  * the DetailPanel's column view. Keyed by `${tabId}::${columnName}` so config is
  * scoped to a single open table tab.
  *
- * Persisted to localStorage so the choices survive reloads.
+ * Session-scoped, NOT persisted: tab ids come from a per-session counter, so a
+ * persisted map would key a previous session's hidden/format choices onto
+ * unrelated new tabs.
  */
 
 export type ColumnFormat =
@@ -39,26 +41,15 @@ export interface ColumnConfig {
 }
 
 const DEFAULT: ColumnConfig = { format: "text", hidden: false };
-const STORAGE_KEY = "studio-react.columnConfig";
+
+// Drop the legacy persisted map (stale tab-id keys leaked across sessions).
+try {
+  localStorage.removeItem("studio-react.columnConfig");
+} catch {
+  /* ignore */
+}
 
 const key = (tabId: string, column: string) => `${tabId}::${column}`;
-
-function load(): Record<string, ColumnConfig> {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as Record<string, ColumnConfig>) : {};
-  } catch {
-    return {};
-  }
-}
-
-function persist(byKey: Record<string, ColumnConfig>) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(byKey));
-  } catch {
-    /* ignore */
-  }
-}
 
 interface ColumnConfigState {
   byKey: Record<string, ColumnConfig>;
@@ -74,21 +65,17 @@ interface ColumnConfigState {
 }
 
 export const useColumnConfigStore = create<ColumnConfigState>((set, get) => ({
-  byKey: load(),
+  byKey: {},
   get: (tabId, column) => get().byKey[key(tabId, column)] ?? DEFAULT,
   setFormat: (tabId, column, format) =>
     set((s) => {
       const k = key(tabId, column);
-      const byKey = { ...s.byKey, [k]: { ...(s.byKey[k] ?? DEFAULT), format } };
-      persist(byKey);
-      return { byKey };
+      return { byKey: { ...s.byKey, [k]: { ...(s.byKey[k] ?? DEFAULT), format } } };
     }),
   setHidden: (tabId, column, hidden) =>
     set((s) => {
       const k = key(tabId, column);
-      const byKey = { ...s.byKey, [k]: { ...(s.byKey[k] ?? DEFAULT), hidden } };
-      persist(byKey);
-      return { byKey };
+      return { byKey: { ...s.byKey, [k]: { ...(s.byKey[k] ?? DEFAULT), hidden } } };
     }),
   setSemanticType: (tabId, column, semanticType) =>
     set((s) => {
@@ -96,9 +83,7 @@ export const useColumnConfigStore = create<ColumnConfigState>((set, get) => ({
       const next = { ...(s.byKey[k] ?? DEFAULT) };
       if (semanticType === undefined) delete next.semanticType;
       else next.semanticType = semanticType;
-      const byKey = { ...s.byKey, [k]: next };
-      persist(byKey);
-      return { byKey };
+      return { byKey: { ...s.byKey, [k]: next } };
     }),
 }));
 

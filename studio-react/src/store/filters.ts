@@ -13,32 +13,21 @@ import {
  * SlashTable's per-tab filter store: a tree edited by the FilterBar and
  * compiled to a read-only WHERE that re-drives the grid.
  *
- * Persisted to localStorage so an open tab's filter survives reloads. The root
- * node id is regenerated per session is irrelevant; the tree shape is what we
- * store.
+ * Session-scoped, NOT persisted: tab ids come from a per-session counter, so
+ * a persisted byTab map would key a previous session's filters onto unrelated
+ * new tabs (e.g. a stale `email` filter applied to a table without that
+ * column).
  */
 
-const STORAGE_KEY = "studio-react.filters";
+// Drop the legacy persisted map (it caused exactly the stale-filter bug above).
+try {
+  localStorage.removeItem("studio-react.filters");
+} catch {
+  /* ignore */
+}
 
 function freshRoot(): FilterGroup {
   return makeGroup("AND");
-}
-
-function load(): Record<string, FilterGroup> {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as Record<string, FilterGroup>) : {};
-  } catch {
-    return {};
-  }
-}
-
-function persist(byTab: Record<string, FilterGroup>) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(byTab));
-  } catch {
-    /* ignore */
-  }
 }
 
 /** Recursively replace the node with id `targetId` using `fn` (immutably). */
@@ -113,14 +102,12 @@ function commit(
   set((s) => {
     const root = s.byTab[tabId] ?? freshRoot();
     const next = fn(root);
-    const byTab = { ...s.byTab, [tabId]: next };
-    persist(byTab);
-    return { byTab };
+    return { byTab: { ...s.byTab, [tabId]: next } };
   });
 }
 
 export const useFilterStore = create<FilterState>((set, get) => ({
-  byTab: load(),
+  byTab: {},
 
   getRoot: (tabId) => get().byTab[tabId] ?? freshRoot(),
 

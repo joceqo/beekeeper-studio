@@ -26,6 +26,10 @@ export interface DockerDbContainer {
   status: string;
   /** Whether the status indicates a running container. */
   running: boolean;
+  /** Credentials read from the container env (e.g. POSTGRES_USER); null when not derivable. */
+  username: string | null;
+  password: string | null;
+  database: string | null;
 }
 
 export interface IDockerHandlers {
@@ -94,6 +98,97 @@ function runDockerPs(): Promise<string | null> {
   });
 }
 
+/**
+ * Read Config.Env for a batch of containers via a single `docker inspect`.
+ * Returns a map of container id → KEY=value pairs parsed into an object.
+ * Best-effort: resolves to an empty map when inspect fails.
+ */
+function inspectContainerEnv(ids: string[]): Promise<Map<string, Record<string, string>>> {
+  return new Promise((resolve) => {
+    if (!ids.length) {
+      resolve(new Map());
+      return;
+    }
+    execFile(
+      "docker",
+      ["inspect", "--format", '{"id":{{json .Id}},"env":{{json .Config.Env}}}', ...ids],
+      { timeout: 4000, windowsHide: true },
+      (err, stdout) => {
+        const byId = new Map<string, Record<string, string>>();
+        if (err) {
+          log.debug("docker inspect unavailable:", err.message);
+          resolve(byId);
+          return;
+        }
+        for (const rawLine of stdout.split("\n")) {
+          const line = rawLine.trim();
+          if (!line) continue;
+          try {
+            const parsed: { id?: string; env?: string[] } = JSON.parse(line);
+            if (!parsed.id) continue;
+            const env: Record<string, string> = {};
+            for (const pair of parsed.env ?? []) {
+              const eq = pair.indexOf("=");
+              if (eq > 0) env[pair.slice(0, eq)] = pair.slice(eq + 1);
+            }
+            byId.set(parsed.id, env);
+          } catch {
+            continue;
+          }
+        }
+        resolve(byId);
+      }
+    );
+  });
+}
+
+/**
+ * Derive connect credentials from a database container's environment, per the
+ * conventions of the official images (postgres, mysql, mariadb, mssql). Fields
+ * stay null when the env doesn't determine them.
+ */
+function credentialsFromEnv(
+  driver: DockerDbContainer["driver"],
+  env: Record<string, string>
+): { username: string | null; password: string | null; database: string | null } {
+  switch (driver) {
+    case "postgres": {
+      // Official image uses POSTGRES_*; bitnami/postgresql uses POSTGRESQL_*.
+      const username = env.POSTGRES_USER ?? env.POSTGRESQL_USERNAME ?? "postgres";
+      // POSTGRES_HOST_AUTH_METHOD=trust means any password is accepted.
+      const password =
+        env.POSTGRES_PASSWORD ??
+        env.POSTGRESQL_PASSWORD ??
+        (env.POSTGRES_HOST_AUTH_METHOD === "trust" || env.ALLOW_EMPTY_PASSWORD === "yes"
+          ? ""
+          : null);
+      // The official image defaults the database name to the user.
+      const database = env.POSTGRES_DB ?? env.POSTGRESQL_DATABASE ?? username;
+      return { username, password, database };
+    }
+    case "mysql":
+    case "mariadb": {
+      const database = env.MYSQL_DATABASE ?? env.MARIADB_DATABASE ?? null;
+      // Prefer the dedicated app user when one is configured.
+      const appUser = env.MYSQL_USER ?? env.MARIADB_USER;
+      const appPassword = env.MYSQL_PASSWORD ?? env.MARIADB_PASSWORD;
+      if (appUser && appPassword != null) {
+        return { username: appUser, password: appPassword, database };
+      }
+      const allowEmpty = /^(1|true|yes)$/i.test(
+        env.MYSQL_ALLOW_EMPTY_PASSWORD ?? env.MARIADB_ALLOW_EMPTY_ROOT_PASSWORD ?? ""
+      );
+      const rootPassword =
+        env.MYSQL_ROOT_PASSWORD ?? env.MARIADB_ROOT_PASSWORD ?? (allowEmpty ? "" : null);
+      return { username: "root", password: rootPassword, database };
+    }
+    case "sqlserver": {
+      const password = env.MSSQL_SA_PASSWORD ?? env.SA_PASSWORD ?? null;
+      return { username: "sa", password, database: null };
+    }
+  }
+}
+
 export const DockerHandlers: IDockerHandlers = {
   "docker/listContainers": async function (): Promise<DockerDbContainer[]> {
     const stdout = await runDockerPs();
@@ -125,7 +220,19 @@ export const DockerHandlers: IDockerHandlers = {
         port,
         status,
         running: (parsed.State ?? "").toLowerCase() === "running" || /^up\b/i.test(status),
+        username: null,
+        password: null,
+        database: null,
       });
+    }
+
+    // Fill in credentials from each container's env (e.g. POSTGRES_USER) so
+    // one-click connect works for non-default setups; defaults stay null.
+    const envById = await inspectContainerEnv(containers.map((c) => c.id).filter(Boolean));
+    for (const container of containers) {
+      const env = envById.get(container.id);
+      if (!env) continue;
+      Object.assign(container, credentialsFromEnv(container.driver, env));
     }
     return containers;
   },
