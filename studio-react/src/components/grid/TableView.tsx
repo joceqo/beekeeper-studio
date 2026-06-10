@@ -21,6 +21,7 @@ import { DetailDockPortal } from "@/components/shell/DetailDock";
 import { useTabsStore, type DrilldownCrumb } from "@/store/tabs";
 import { useFilterStore } from "@/store/filters";
 import { useColumnConfigStore } from "@/store/columnConfig";
+import { useUiStore } from "@/store/ui";
 import { compileWhere } from "@/lib/filters";
 import {
   relationColumns,
@@ -32,6 +33,7 @@ import {
 import type { CellValue, ColumnDef } from "@/ipc";
 import { useRelationCounts } from "./useRelationCounts";
 import { useM2MRelations } from "./useM2MRelations";
+import { useColumnFill } from "./useColumnFill";
 import { IconButton, Button, Tooltip } from "@/ui";
 
 interface Props {
@@ -78,9 +80,8 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
 
   // Column-header context-menu actions (Agent C).
   const addCondition = useFilterStore((s) => s.addCondition);
-  const updateNode = useFilterStore((s) => s.updateNode);
-  const getRoot = useFilterStore((s) => s.getRoot);
   const setColumnHidden = useColumnConfigStore((s) => s.setHidden);
+  const requestOpenFilter = useUiStore((s) => s.requestOpenFilter);
 
   // Virtual relation columns (outgoing parents + incoming children).
   const baseRelations = useMemo<RelationColumn[]>(
@@ -192,14 +193,10 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
   // existing filter tree is preserved.
   const onFilterColumn = useCallback(
     (column: ColumnDef) => {
-      const before = new Set(getRoot(tabId).children.map((c) => c.id));
-      addCondition(tabId, undefined, column.name);
-      // Default the new leaf to `is not null` so it contributes immediately and
-      // reads as an active filter the user can refine.
-      const after = getRoot(tabId).children.find((c) => !before.has(c.id));
-      if (after) updateNode(tabId, after.id, { operator: "is_not_null" });
+      const condition = addCondition(tabId, undefined, column.name);
+      requestOpenFilter({ tabId, nodeId: condition.id });
     },
-    [tabId, addCondition, updateNode, getRoot]
+    [tabId, addCondition, requestOpenFilter]
   );
 
   const onHideColumn = useCallback(
@@ -235,6 +232,21 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
     rows: page?.rows ?? [],
     relations,
     pageKey,
+  });
+
+  // Per-column completeness (fill rate) → 3-bar header glyph. Accumulates from
+  // loaded pages (only when unfiltered, so the estimate stays unbiased) and is
+  // upgraded by a whole-table TABLESAMPLE on Postgres. See useColumnFill.
+  const fill = useColumnFill({
+    connectionId,
+    schema,
+    table,
+    columns: page?.columns ?? [],
+    rows: page?.rows ?? [],
+    totalRows: page?.totalRows ?? null,
+    pkIndex: page?.columns.findIndex((c) => c.primaryKey) ?? -1,
+    pageSig: pageKey,
+    active: !where,
   });
 
   // Drill into related rows: open a new relation tab with a breadcrumb path.
@@ -388,6 +400,7 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
               onHideColumn={onHideColumn}
               onConfigureColumn={onConfigureColumn}
               stats={stats}
+              fill={fill}
             />
           ) : null}
         </div>
@@ -406,6 +419,7 @@ export function TableView({ tabId, connectionId, schema, table }: Props) {
               mode={selection.mode}
               description={description}
               stats={stats}
+              fill={fill}
               onClose={() => {
                 clearSelection(tabId);
                 toggleDock();

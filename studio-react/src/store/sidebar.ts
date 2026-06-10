@@ -11,6 +11,7 @@ import { create } from "zustand";
  */
 
 const EXPLORER_KEY = "studio-react.explorer.collapsed";
+const FAVORITES_KEY = "studio-react.sidebar.tableFavorites";
 
 function readCollapsed(): Record<string, boolean> {
   try {
@@ -29,6 +30,27 @@ function writeCollapsed(map: Record<string, boolean>) {
   }
 }
 
+function readFavorites(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(FAVORITES_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeFavorites(map: Record<string, boolean>) {
+  try {
+    localStorage.setItem(FAVORITES_KEY, JSON.stringify(map));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function tableFavoriteKey(connectionId: string, schema: string, table: string): string {
+  return `${connectionId}::${schema}.${table}`;
+}
+
 interface SidebarState {
   activeConnectionId: string | null;
   expandedConnections: Record<string, boolean>;
@@ -36,6 +58,8 @@ interface SidebarState {
   explorerCollapsed: Record<string, boolean>;
   /** Bumped to make the Sidebar re-fetch its connection list (e.g. after a save). */
   connectionsRevision: number;
+  /** Favorite tables keyed by connection + qualified table name. */
+  tableFavorites: Record<string, boolean>;
   /** Connections with a live backend connection (each shows a green dot). */
   connectedIds: Set<string>;
   /** Connections currently connecting (each shows a spinner). */
@@ -51,6 +75,8 @@ interface SidebarState {
   isCollapsed: (id: string) => boolean;
   /** Trigger a refresh of the sidebar's connection list. */
   refreshConnections: () => void;
+  toggleTableFavorite: (connectionId: string, schema: string, table: string) => void;
+  isTableFavorite: (connectionId: string | null, schema: string, table: string) => boolean;
 }
 
 export const useSidebarStore = create<SidebarState>((set, get) => ({
@@ -60,6 +86,7 @@ export const useSidebarStore = create<SidebarState>((set, get) => ({
   expandedConnections: {},
   explorerCollapsed: readCollapsed(),
   connectionsRevision: 0,
+  tableFavorites: readFavorites(),
   connectedIds: new Set(),
   connectingIds: new Set(),
   setActiveConnection: (id) => set({ activeConnectionId: id }),
@@ -84,6 +111,19 @@ export const useSidebarStore = create<SidebarState>((set, get) => ({
       return { connectingIds };
     }),
   refreshConnections: () => set((s) => ({ connectionsRevision: s.connectionsRevision + 1 })),
+  toggleTableFavorite: (connectionId, schema, table) =>
+    set((s) => {
+      const key = tableFavoriteKey(connectionId, schema, table);
+      const tableFavorites = { ...s.tableFavorites };
+      if (tableFavorites[key]) delete tableFavorites[key];
+      else tableFavorites[key] = true;
+      writeFavorites(tableFavorites);
+      return { tableFavorites };
+    }),
+  isTableFavorite: (connectionId, schema, table) =>
+    connectionId
+      ? !!get().tableFavorites[tableFavoriteKey(connectionId, schema, table)]
+      : false,
   toggleConnection: (id) =>
     set((s) => ({
       expandedConnections: {

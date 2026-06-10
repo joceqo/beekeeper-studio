@@ -4,6 +4,7 @@ import type {
   ColumnDef,
   Connection,
   ConnectionConfig,
+  DockerContainer,
   GetRecordsParams,
   GetRelationCountsParams,
   GetSchemaGraphOptions,
@@ -320,6 +321,11 @@ export class McpBackendClient implements BackendClient {
   /** Open/resolve the saved connection and return the live MCP connectionId. */
   async connect(connectionId: string): Promise<string> {
     return this.resolveConnection(connectionId);
+  }
+
+  async listDockerContainers(): Promise<DockerContainer[]> {
+    // The MCP HTTP server exposes no Docker inspection; degrade to none.
+    return [];
   }
 
   async listConnections(): Promise<Connection[]> {

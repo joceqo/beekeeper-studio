@@ -28,6 +28,8 @@ interface UiState {
   focusSearchSignal: number;
   /** Bumped to ask the active table view to open its filter bar. */
   openFilterSignal: number;
+  /** Optional target for a filter-open request, used to focus a newly-created condition. */
+  openFilterRequest?: { signal: number; tabId?: string; nodeId?: string };
 
   setPaletteOpen: (open: boolean) => void;
   togglePalette: () => void;
@@ -36,7 +38,7 @@ interface UiState {
   setVimMode: (v: boolean) => void;
 
   requestFocusSearch: () => void;
-  requestOpenFilter: () => void;
+  requestOpenFilter: (request?: { tabId?: string; nodeId?: string }) => void;
 }
 
 export const useUiStore = create<UiState>((set, get) => ({
@@ -47,6 +49,7 @@ export const useUiStore = create<UiState>((set, get) => ({
 
   focusSearchSignal: 0,
   openFilterSignal: 0,
+  openFilterRequest: undefined,
 
   setPaletteOpen: (open) => set({ paletteOpen: open }),
   togglePalette: () => set((s) => ({ paletteOpen: !s.paletteOpen })),
@@ -62,5 +65,11 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
 
   requestFocusSearch: () => set({ focusSearchSignal: get().focusSearchSignal + 1 }),
-  requestOpenFilter: () => set({ openFilterSignal: get().openFilterSignal + 1 }),
+  requestOpenFilter: (request) => {
+    const signal = get().openFilterSignal + 1;
+    set({
+      openFilterSignal: signal,
+      openFilterRequest: { signal, ...request },
+    });
+  },
 }));

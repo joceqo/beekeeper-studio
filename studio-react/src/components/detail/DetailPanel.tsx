@@ -4,7 +4,7 @@ import {
   Eye,
   EyeOff,
   X,
-  Pencil,
+  Maximize2,
   RotateCcw,
   Plus,
   Trash2,
@@ -30,6 +30,7 @@ import {
   editKey,
   type PendingEdit,
 } from "@/store/pendingEdits";
+import { fillBars, type FillInfo } from "@/store/fillStats";
 import {
   cn,
   IconButton,
@@ -58,6 +59,8 @@ interface Props {
   description: TableDescription | null;
   /** Per-column value stats, for inferred semantic type shown in the TypePicker. */
   stats?: Map<string, ColumnStats>;
+  /** Per-column completeness (fill rate), shown in the column detail. */
+  fill?: Map<string, FillInfo>;
   onClose: () => void;
 }
 
@@ -97,6 +100,7 @@ export function DetailPanel({
   mode,
   description,
   stats,
+  fill,
   onClose,
 }: Props) {
   const openTable = useTabsStore((s) => s.openTable);
@@ -130,6 +134,7 @@ export function DetailPanel({
         columnName={columnName}
         fkRef={fks.get(columnName) ?? null}
         stats={stats?.get(columnName)}
+        fill={fill?.get(columnName)}
       />
     );
   } else if (mode === "row" && row) {
@@ -352,11 +357,25 @@ function FieldEditor({
     return <FkLink value={value} reference={fkRef} onFollowFk={onFollowFk} />;
   }
 
+  // Read-only (e.g. a table with no primary key): still render an input per
+  // field so empty/NULL values show as an (empty) box instead of a blank gap —
+  // it just can't be typed into. The "read-only" notice lives in the header.
   if (!editable) {
-    return value === null || value === undefined ? (
-      <NullValue />
-    ) : (
-      <span>{String(value)}</span>
+    const isNull = value === null || value === undefined;
+    const display = isNull ? "" : String(value);
+    // Distinguish NULL from an empty string '' — both render as an empty box,
+    // so the placeholder carries the distinction.
+    const placeholder = isNull ? "NULL" : display === "" ? "'' (empty)" : undefined;
+    return (
+      <Input
+        size="sm"
+        readOnly
+        tabIndex={-1}
+        title={isNull ? "NULL" : display === "" ? "empty string ''" : display}
+        value={display}
+        placeholder={placeholder}
+        className="cursor-default bg-bg-secondary text-text-secondary focus:border-border focus:ring-0"
+      />
     );
   }
 
@@ -387,9 +406,9 @@ function FieldEditor({
     return <ArrayEditor value={value} onChange={onChange} />;
   }
 
-  // json / code → popout dialog editor with a pencil button.
+  // json / code → mono inline + popout dialog editor.
   if (sem === "json" || sem === "code") {
-    return <JsonEditor column={column} value={value} onChange={onChange} />;
+    return <ValueEditor column={column} value={value} onChange={onChange} mono />;
   }
 
   // color → swatch + hex input.
@@ -413,15 +432,8 @@ function FieldEditor({
     );
   }
 
-  // text default.
-  return (
-    <Input
-      size="sm"
-      value={value === null || value === undefined ? "" : String(value)}
-      placeholder="NULL"
-      onChange={(e) => onChange(e.target.value)}
-    />
-  );
+  // text default → inline input + popout editor (matches SlashTable).
+  return <ValueEditor column={column} value={value} onChange={onChange} />;
 }
 
 /** Simple multi-value array editor: one Input per element + add/remove. */
@@ -534,52 +546,56 @@ function HighlightedJson({ value, limit = 120 }: { value: string; limit?: number
   return <>{out}</>;
 }
 
-function JsonEditor({
+/**
+ * Inline value editor with a popout modal — mirrors SlashTable's EditorBody
+ * (inline edit, Maximize-to-modal, Set NULL). `mono` renders a syntax-highlighted
+ * preview inline for json/code; plain text edits directly in the inline input.
+ */
+function ValueEditor({
   column,
   value,
   onChange,
+  mono = false,
 }: {
   column: ColumnDef;
   value: CellValue;
   onChange: (value: CellValue) => void;
+  mono?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const text = value === null || value === undefined ? "" : String(value);
+  const isNull = value === null || value === undefined;
+  const text = isNull ? "" : String(value);
   const [draft, setDraft] = useState(text);
   const [jsonError, setJsonError] = useState<string | null>(null);
-  // Inline entry for an empty value: local state, committed on blur, so an empty
-  // JSON/code field is a typeable input (not a static "NULL"). Local state keeps
-  // focus while typing (the parent value stays null until blur).
-  const [emptyDraft, setEmptyDraft] = useState("");
+  // Show the highlighted preview only for non-empty json/code; otherwise edit
+  // directly in the inline input.
+  const showPreview = mono && text !== "";
 
   return (
     <div className="flex items-start gap-1">
-      {text === "" ? (
-        <Input
-          size="sm"
-          className="min-w-0 flex-1 font-mono"
-          placeholder="NULL"
-          value={emptyDraft}
-          onChange={(e) => setEmptyDraft(e.target.value)}
-          onBlur={() => {
-            if (emptyDraft !== "") onChange(emptyDraft);
-          }}
-        />
-      ) : (
+      {showPreview ? (
         <code className="min-w-0 flex-1 break-words rounded-sm bg-bg-secondary px-1.5 py-1 font-mono text-xs text-text-secondary">
           <HighlightedJson value={text} limit={120} />
         </code>
+      ) : (
+        <Input
+          size="sm"
+          className={cn("min-w-0 flex-1", mono && "font-mono")}
+          placeholder="NULL"
+          value={text}
+          onChange={(e) => onChange(e.target.value)}
+        />
       )}
       <IconButton
         aria-label={`Edit ${column.name}`}
-        title="Edit value"
+        title="Edit in a larger editor"
         onClick={() => {
           setDraft(text);
           setJsonError(null);
           setOpen(true);
         }}
       >
-        <Pencil size={12} />
+        <Maximize2 size={12} />
       </IconButton>
       <Dialog
         open={open}
@@ -588,6 +604,17 @@ function JsonEditor({
         description={column.dataType}
         footer={
           <>
+            <Button
+              variant="subtle"
+              size="sm"
+              className="mr-auto"
+              onClick={() => {
+                onChange(null);
+                setOpen(false);
+              }}
+            >
+              Set NULL
+            </Button>
             <Button variant="subtle" size="sm" onClick={() => setOpen(false)}>
               Cancel
             </Button>
@@ -869,18 +896,46 @@ function typeOptionLabel(type: SemanticType): React.ReactNode {
   );
 }
 
+/** Inline 3-bar fill glyph + label for the column detail (mirrors the header). */
+function CompletenessBars({ fill }: { fill: FillInfo }) {
+  const lit = fillBars(fill.ratio);
+  const pct = Math.round(fill.ratio * 100);
+  const basis =
+    fill.basis === "sample"
+      ? `~${pct}% filled · ${fill.seen}-row sample`
+      : `${pct}% filled · ${fill.filled}/${fill.seen} loaded`;
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex items-center gap-0.5" title={basis}>
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            className={cn("h-3 w-1", i < lit ? "bg-accent" : "bg-text-muted/30")}
+          />
+        ))}
+      </div>
+      <span className="font-mono text-text-secondary">{pct}%</span>
+      <span className="text-xs text-text-muted">
+        {fill.basis === "sample" ? "sampled" : `${fill.filled}/${fill.seen} loaded`}
+      </span>
+    </div>
+  );
+}
+
 function ColumnDetail({
   tabId,
   column,
   columnName,
   fkRef,
   stats,
+  fill,
 }: {
   tabId: string;
   column: ColumnDef | null;
   columnName: string;
   fkRef: string | null;
   stats?: ColumnStats;
+  fill?: FillInfo;
 }) {
   const config = useColumnConfigStore((s) => s.byKey[`${tabId}::${columnName}`]) ?? {
     format: "text" as ColumnFormat,
@@ -936,6 +991,17 @@ function ColumnDetail({
           </div>
         )}
       </dl>
+
+      {/* Completeness (fill rate) — how many rows have a non-null, non-empty
+          value. From a whole-table sample (Postgres) or the loaded rows. */}
+      {fill && (
+        <div>
+          <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-text-muted">
+            Completeness
+          </div>
+          <CompletenessBars fill={fill} />
+        </div>
+      )}
 
       {/* Semantic-type override (TypePicker). "Auto" uses the inferred type;
           "None" disables semantic rendering for this column. Persisted per

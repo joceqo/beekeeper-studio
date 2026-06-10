@@ -15,10 +15,14 @@ import {
   Pencil,
   Trash2,
   Loader2,
+  Star,
+  Container,
 } from "lucide-react";
 import {
   backend,
   type Connection,
+  type ConnectionConfig,
+  type DockerContainer,
   type Schema,
   type TableSummary,
 } from "@/ipc";
@@ -50,10 +54,69 @@ const TAG_TONE: Record<NonNullable<Connection["tagColor"]>, BadgeProps["tone"]> 
   neutral: "neutral",
 };
 
+/** Short engine label shown as a neutral badge when a connection has no custom tag. */
+const KIND_BADGE: Record<Connection["kind"], string> = {
+  postgres: "PG",
+  mysql: "MYSQL",
+  sqlite: "SQLITE",
+  sqlserver: "MSSQL",
+};
+
+/**
+ * The backend client key + fallback credentials for one-click connecting a
+ * Docker container. Credentials detected from the container env (DockerContainer
+ * username/password/database) take precedence over these.
+ */
+const DOCKER_DEFAULTS: Record<
+  Connection["kind"],
+  { client: string; username: string; password: string; database: string }
+> = {
+  postgres: { client: "postgresql", username: "postgres", password: "postgres", database: "postgres" },
+  mysql: { client: "mysql", username: "root", password: "", database: "" },
+  sqlite: { client: "sqlite", username: "", password: "", database: "" },
+  sqlserver: { client: "sqlserver", username: "sa", password: "", database: "" },
+};
+
 function TableIcon({ type }: { type: TableSummary["type"] }) {
   if (type === "view") return <Eye size={13} className="text-info" />;
   if (type === "materialized-view") return <Layers size={13} className="text-info" />;
   return <Table2 size={13} className="text-text-muted" />;
+}
+
+/** Copy text to the clipboard with a confirmation toast. */
+function copyToClipboard(text: string, label: string) {
+  const done = () => notify.success(`Copied ${label}`);
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).then(done, () => notify.error("Copy failed"));
+  } else {
+    done();
+  }
+}
+
+/** Right-click menu for a table row (matches SlashTable's table context menu). */
+function tableMenu(
+  t: TableSummary,
+  actions: {
+    onOpenTable: (t: TableSummary) => void;
+    onOpenGraph: (t: TableSummary) => void;
+    onToggleFavorite: (t: TableSummary) => void;
+    isFavorite: (t: TableSummary) => boolean;
+  }
+): MenuEntry[] {
+  const qualified = `${t.schema}.${t.name}`;
+  const favorite = actions.isFavorite(t);
+  return [
+    { label: "Open in New Tab", onSelect: () => actions.onOpenTable(t) },
+    { label: "Open Schema Graph", onSelect: () => actions.onOpenGraph(t) },
+    {
+      label: favorite ? "Remove Favorite" : "Add Favorite",
+      icon: <Star size={13} className={favorite ? "fill-current text-accent" : undefined} />,
+      onSelect: () => actions.onToggleFavorite(t),
+    },
+    { type: "separator" },
+    { label: "Copy Name", onSelect: () => copyToClipboard(t.name, t.name) },
+    { label: "Copy Qualified Name", onSelect: () => copyToClipboard(qualified, qualified) },
+  ];
 }
 
 export function Sidebar() {
@@ -66,6 +129,9 @@ export function Sidebar() {
   const toggleConnection = useSidebarStore((s) => s.toggleConnection);
   const explorerCollapsed = useSidebarStore((s) => s.explorerCollapsed);
   const toggleGroup = useSidebarStore((s) => s.toggleGroup);
+  const tableFavorites = useSidebarStore((s) => s.tableFavorites);
+  const toggleTableFavorite = useSidebarStore((s) => s.toggleTableFavorite);
+  const isTableFavorite = useSidebarStore((s) => s.isTableFavorite);
   const connectionsRevision = useSidebarStore((s) => s.connectionsRevision);
   const refreshConnections = useSidebarStore((s) => s.refreshConnections);
   const connectedIds = useSidebarStore((s) => s.connectedIds);
@@ -95,6 +161,9 @@ export function Sidebar() {
   }, [tabsList, activeTabId, activeConnectionId]);
 
   const [connections, setConnections] = useState<Connection[]>([]);
+  const [dockerContainers, setDockerContainers] = useState<DockerContainer[]>([]);
+  /** Container ids currently being connected (shows a spinner on the row). */
+  const [connectingDocker, setConnectingDocker] = useState<Set<string>>(new Set());
   const [schemas, setSchemas] = useState<Schema[]>([]);
   const [tables, setTables] = useState<TableSummary[]>([]);
   const [search, setSearch] = useState("");
@@ -119,6 +188,18 @@ export function Sidebar() {
     });
     // Re-fetch when a connection is saved (connectionsRevision bump).
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectionsRevision]);
+
+  // Detect running Docker DB containers (best-effort; empty when Docker is off).
+  useEffect(() => {
+    let cancelled = false;
+    backend
+      .listDockerContainers()
+      .then((c) => !cancelled && setDockerContainers(c))
+      .catch(() => !cancelled && setDockerContainers([]));
+    return () => {
+      cancelled = true;
+    };
   }, [connectionsRevision]);
 
   useEffect(() => {
@@ -158,6 +239,17 @@ export function Sidebar() {
   // Group connections into folders (folder-less connections render top-level).
   const connectionGroups = useMemo(() => groupConnections(connections), [connections]);
 
+  // All detected containers render in the Docker section (SlashTable-style); a
+  // container that maps to a saved connection (same host:port) is tagged with
+  // that connection so clicking activates it instead of creating a duplicate.
+  const dockerToShow = useMemo(() => {
+    const byHost = new Map(connections.map((c) => [c.host, c] as const));
+    return dockerContainers.map((dc) => ({
+      container: dc,
+      match: byHost.get(`${dc.host}:${dc.port}`) ?? null,
+    }));
+  }, [dockerContainers, connections]);
+
   // Build the explorer tree (schema folders + prefix groups, public-first).
   const schemaCounts = useMemo(() => {
     const m: Record<string, number> = {};
@@ -167,6 +259,10 @@ export function Sidebar() {
   const tree = useMemo(
     () => buildExplorerTree(tables, schemaCounts, search),
     [tables, schemaCounts, search]
+  );
+  const favoriteTables = useMemo(
+    () => tables.filter((t) => isTableFavorite(activeConnectionId, t.schema, t.name)),
+    [tables, activeConnectionId, tableFavorites, isTableFavorite]
   );
 
   if (collapsed) {
@@ -205,6 +301,139 @@ export function Sidebar() {
     } catch (e) {
       notify.error(e instanceof Error ? e.message : String(e));
     }
+  };
+
+  /**
+   * One-click connect a detected Docker container: reuse an existing saved
+   * connection on the same host:port, otherwise create one using credentials
+   * detected from the container env (falling back to the engine defaults),
+   * then connect + open its first table. Auth failures surface as a toast.
+   */
+  const connectDockerContainer = async (dc: DockerContainer) => {
+    const hostKey = `${dc.host}:${dc.port}`;
+    const existing = connections.find((c) => c.host === hostKey);
+    setConnectingDocker((s) => new Set(s).add(dc.id));
+    try {
+      let targetId: string;
+      if (existing) {
+        targetId = existing.id;
+      } else {
+        const defaults = DOCKER_DEFAULTS[dc.kind];
+        let base: ConnectionConfig = {};
+        try {
+          base = await backend.newConnection();
+        } catch {
+          /* mock backends may not provide defaults */
+        }
+        const config: ConnectionConfig = {
+          ...base,
+          name: dc.name,
+          connectionType: defaults.client,
+          host: dc.host,
+          port: dc.port,
+          defaultDatabase: dc.database ?? (defaults.database || null),
+          username: dc.username ?? (defaults.username || null),
+          password: dc.password ?? (defaults.password || null),
+        };
+        const saved = await backend.saveConnection(config);
+        refreshConnections();
+        targetId = saved.id;
+      }
+      setActiveConnection(targetId);
+      if (!expanded[targetId]) toggleConnection(targetId);
+      // Connect explicitly (the active-connection effect only fires on change,
+      // so re-clicking an already-active row must still retry the connection).
+      let liveId: string;
+      try {
+        liveId = await backend.connect(targetId);
+      } catch (e) {
+        // A linked connection may hold stale credentials (e.g. saved before
+        // container-env detection existed). Repair from the container env
+        // once and retry; if that also fails, surface the original flow's error.
+        if (!existing || dc.username == null) throw e;
+        const config = await backend.getConnectionConfig(targetId);
+        if (!config) throw e;
+        await backend.saveConnection({
+          ...config,
+          username: dc.username,
+          password: dc.password ?? config.password,
+          defaultDatabase: dc.database ?? config.defaultDatabase,
+        });
+        refreshConnections();
+        liveId = await backend.connect(targetId);
+        notify.info(`${existing.name}: credentials updated from the container env`);
+      }
+      markConnected(targetId);
+      const dbTables = await backend.listTables(liveId);
+      const first = dbTables.find((t) => t.type === "table") ?? dbTables[0];
+      if (first) openTable(targetId, first.schema, first.name);
+      notify.success(`Connected to ${dc.name}`);
+    } catch (e) {
+      notify.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setConnectingDocker((s) => {
+        const next = new Set(s);
+        next.delete(dc.id);
+        return next;
+      });
+    }
+  };
+
+  const renderDockerContainer = ({
+    container: dc,
+    match,
+  }: {
+    container: DockerContainer;
+    match: Connection | null;
+  }) => {
+    const connecting = connectingDocker.has(dc.id);
+    const matchConnected = match ? connectedIds.has(match.id) : false;
+    const hostPort = dc.port != null ? `${dc.host}:${dc.port}` : dc.host;
+    const menu: MenuEntry[] = [
+      { label: "Connect", onSelect: () => void connectDockerContainer(dc) },
+      ...(match
+        ? [
+            {
+              label: "Edit Linked Connection…",
+              icon: <Pencil size={13} />,
+              onSelect: () => openConnection(match.id),
+            } satisfies MenuEntry,
+          ]
+        : []),
+      { type: "separator" },
+      { label: "Copy Host", onSelect: () => copyToClipboard(hostPort, hostPort) },
+    ];
+    return (
+      <ContextMenu key={dc.id} items={menu}>
+      <button
+        title={`${dc.image} · ${dc.status}${match ? ` · linked to ${match.name}` : ""}`}
+        disabled={connecting}
+        className="flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left font-mono text-md text-text-secondary transition-colors duration-100 ease-out hover:bg-bg-hover disabled:opacity-60"
+        onClick={() => void connectDockerContainer(dc)}
+      >
+        <Container size={13} className="shrink-0 text-docker" />
+        <span className="truncate">{dc.name}</span>
+        <Badge tone="neutral" className="font-mono uppercase tracking-wide text-docker">
+          Docker
+        </Badge>
+        {dc.port != null && (
+          <span className="shrink-0 text-xs tabular-nums text-text-muted">:{dc.port}</span>
+        )}
+        {connecting ? (
+          <Loader2 size={12} className="ml-auto shrink-0 animate-spin text-text-muted" />
+        ) : (
+          <span
+            className={cn(
+              "ml-auto h-1.5 w-1.5 shrink-0 rounded-full",
+              // green when its saved connection is live, docker-blue when it's a
+              // known-but-idle connection, hollow when not yet saved.
+              matchConnected ? "bg-success" : match ? "bg-docker/60" : "bg-text-muted/40"
+            )}
+          />
+        )}
+      </button>
+      </ContextMenu>
+    );
   };
 
   const renderConnection = (c: Connection) => {
@@ -253,25 +482,20 @@ export function Sidebar() {
           />
         )}
         <span className="truncate">{c.name}</span>
-        {c.tag && (
-          <Badge
-            tone={TAG_TONE[c.tagColor ?? "neutral"]}
-            className="ml-auto font-mono uppercase tracking-wide"
-          >
-            {c.tag}
-          </Badge>
-        )}
+        {/* Custom env tag (mock) takes priority; otherwise a neutral engine badge. */}
+        <Badge
+          tone={c.tag ? TAG_TONE[c.tagColor ?? "neutral"] : "neutral"}
+          className="ml-auto font-mono uppercase tracking-wide"
+        >
+          {c.tag ?? KIND_BADGE[c.kind]}
+        </Badge>
         {connectingIds.has(c.id) ? (
-          <Loader2
-            size={12}
-            className={cn("shrink-0 animate-spin text-text-muted", c.tag ? "ml-1.5" : "ml-auto")}
-          />
+          <Loader2 size={12} className="ml-1.5 shrink-0 animate-spin text-text-muted" />
         ) : (
           <span
             className={cn(
-              "h-1.5 w-1.5 shrink-0 rounded-full",
-              connectedIds.has(c.id) ? "bg-success" : "bg-text-muted/40",
-              c.tag ? "ml-1.5" : "ml-auto"
+              "ml-1.5 h-1.5 w-1.5 shrink-0 rounded-full",
+              connectedIds.has(c.id) ? "bg-success" : "bg-text-muted/40"
             )}
           />
         )}
@@ -328,6 +552,69 @@ export function Sidebar() {
             </div>
           );
         })}
+      </div>
+
+      {/* DOCKER (auto-detected running DB containers) */}
+      {dockerToShow.length > 0 &&
+        (() => {
+          const id = "docker-section";
+          const open = !explorerCollapsed[id];
+          return (
+            <>
+              <div className="mt-3 flex items-center justify-between px-3 pb-1">
+                <button
+                  className="flex items-center gap-1.5 font-sans text-xs font-semibold uppercase tracking-wide text-text-muted transition-colors duration-100 ease-out hover:text-text-secondary"
+                  onClick={() => toggleGroup(id)}
+                >
+                  {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                  <Container size={12} className="text-docker" />
+                  Docker
+                </button>
+                <span className="font-mono text-xs tabular-nums text-text-muted">
+                  {dockerToShow.length}
+                </span>
+              </div>
+              {open && <div className="px-1.5">{dockerToShow.map(renderDockerContainer)}</div>}
+            </>
+          );
+        })()}
+
+      {/* FAVORITES */}
+      <div className="mt-3 flex items-center justify-between px-3 pb-1">
+        <span className="font-sans text-xs font-semibold uppercase tracking-wide text-text-muted">
+          Favorites
+        </span>
+        <span className="font-mono text-xs tabular-nums text-text-muted">
+          {favoriteTables.length || ""}
+        </span>
+      </div>
+      <div className="px-1.5">
+        {favoriteTables.length > 0 ? (
+          favoriteTables.map((t) => (
+            <FavoriteTableRow
+              key={`${t.schema}.${t.name}`}
+              table={t}
+              activeTable={activeTable}
+              onOpenTable={(table) =>
+                activeConnectionId && openTable(activeConnectionId, table.schema, table.name)
+              }
+              onOpenGraph={(table) =>
+                activeConnectionId && openGraph(activeConnectionId, table.schema, table.name, table.schema)
+              }
+              onToggleFavorite={(table) =>
+                activeConnectionId &&
+                toggleTableFavorite(activeConnectionId, table.schema, table.name)
+              }
+              isFavorite={(table) =>
+                isTableFavorite(activeConnectionId, table.schema, table.name)
+              }
+            />
+          ))
+        ) : (
+          <div className="px-2 py-1 font-sans text-xs text-text-muted">
+            No favorites.
+          </div>
+        )}
       </div>
 
       {/* EXPLORER */}
@@ -392,6 +679,16 @@ export function Sidebar() {
                       onOpenTable={(t) =>
                         activeConnectionId && openTable(activeConnectionId, t.schema, t.name)
                       }
+                      onOpenGraph={(t) =>
+                        activeConnectionId && openGraph(activeConnectionId, t.schema, t.name, t.schema)
+                      }
+                      onToggleFavorite={(t) =>
+                        activeConnectionId &&
+                        toggleTableFavorite(activeConnectionId, t.schema, t.name)
+                      }
+                      isFavorite={(t) =>
+                        isTableFavorite(activeConnectionId, t.schema, t.name)
+                      }
                     />
                   ))}
                 </div>
@@ -414,12 +711,18 @@ function ExplorerNodeRow({
   activeTable,
   onToggleGroup,
   onOpenTable,
+  onOpenGraph,
+  onToggleFavorite,
+  isFavorite,
 }: {
   node: ExplorerNode;
   collapsedMap: Record<string, boolean>;
   activeTable: { schema: string; table: string } | null;
   onToggleGroup: (id: string) => void;
   onOpenTable: (t: TableSummary) => void;
+  onOpenGraph: (t: TableSummary) => void;
+  onToggleFavorite: (t: TableSummary) => void;
+  isFavorite: (t: TableSummary) => boolean;
 }) {
   const isActiveTable = (t: TableSummary) =>
     !!activeTable && activeTable.schema === t.schema && activeTable.table === t.name;
@@ -428,19 +731,22 @@ function ExplorerNodeRow({
     const rows = formatRowEstimate(t.rowEstimate);
     const active = isActiveTable(t);
     return (
-      <button
-        className={cn(
-          "flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-md transition-colors duration-100 ease-out hover:bg-bg-hover",
-          active && "bg-accent-subtle"
-        )}
-        onClick={() => onOpenTable(t)}
-      >
-        <TableIcon type={t.type} />
-        <span className={cn("truncate", active ? "text-text-primary" : "text-text-secondary")}>
-          {t.name}
-        </span>
-        {rows && <span className="ml-auto text-xs tabular-nums text-text-muted">{rows}</span>}
-      </button>
+      <ContextMenu items={tableMenu(t, { onOpenTable, onOpenGraph, onToggleFavorite, isFavorite })}>
+        <button
+          className={cn(
+            "flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-md transition-colors duration-100 ease-out hover:bg-bg-hover",
+            active && "bg-accent-subtle"
+          )}
+          onClick={() => onOpenTable(t)}
+        >
+          <TableIcon type={t.type} />
+          <span className={cn("truncate", active ? "text-text-primary" : "text-text-secondary")}>
+            {t.name}
+          </span>
+          {isFavorite(t) && <Star size={11} className="shrink-0 fill-current text-accent" />}
+          {rows && <span className="ml-auto text-xs tabular-nums text-text-muted">{rows}</span>}
+        </button>
+      </ContextMenu>
     );
   }
 
@@ -470,25 +776,75 @@ function ExplorerNodeRow({
             const rows = formatRowEstimate(child.table.rowEstimate);
             const active = isActiveTable(child.table);
             return (
-              <button
+              <ContextMenu
                 key={`${child.table.schema}.${child.table.name}`}
-                className={cn(
-                  "flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-md transition-colors duration-100 ease-out hover:bg-bg-hover",
-                  active && "bg-accent-subtle"
-                )}
-                onClick={() => onOpenTable(child.table)}
+                items={tableMenu(child.table, {
+                  onOpenTable,
+                  onOpenGraph,
+                  onToggleFavorite,
+                  isFavorite,
+                })}
               >
-                <TableIcon type={child.table.type} />
-                <span className={cn("truncate", active ? "text-text-primary" : "text-text-secondary")}>
-                  {child.table.name}
-                </span>
-                {rows && <span className="ml-auto text-xs tabular-nums text-text-muted">{rows}</span>}
-              </button>
+                <button
+                  className={cn(
+                    "flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-md transition-colors duration-100 ease-out hover:bg-bg-hover",
+                    active && "bg-accent-subtle"
+                  )}
+                  onClick={() => onOpenTable(child.table)}
+                >
+                  <TableIcon type={child.table.type} />
+                  <span className={cn("truncate", active ? "text-text-primary" : "text-text-secondary")}>
+                    {child.table.name}
+                  </span>
+                  {isFavorite(child.table) && (
+                    <Star size={11} className="shrink-0 fill-current text-accent" />
+                  )}
+                  {rows && <span className="ml-auto text-xs tabular-nums text-text-muted">{rows}</span>}
+                </button>
+              </ContextMenu>
             );
           })}
         </div>
       )}
     </div>
+  );
+}
+
+function FavoriteTableRow({
+  table,
+  activeTable,
+  onOpenTable,
+  onOpenGraph,
+  onToggleFavorite,
+  isFavorite,
+}: {
+  table: TableSummary;
+  activeTable: { schema: string; table: string } | null;
+  onOpenTable: (t: TableSummary) => void;
+  onOpenGraph: (t: TableSummary) => void;
+  onToggleFavorite: (t: TableSummary) => void;
+  isFavorite: (t: TableSummary) => boolean;
+}) {
+  const active =
+    !!activeTable && activeTable.schema === table.schema && activeTable.table === table.name;
+  const rows = formatRowEstimate(table.rowEstimate);
+  return (
+    <ContextMenu items={tableMenu(table, { onOpenTable, onOpenGraph, onToggleFavorite, isFavorite })}>
+      <button
+        className={cn(
+          "flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-md transition-colors duration-100 ease-out hover:bg-bg-hover",
+          active && "bg-accent-subtle"
+        )}
+        onClick={() => onOpenTable(table)}
+      >
+        <Star size={12} className="shrink-0 fill-current text-accent" />
+        <span className={cn("truncate", active ? "text-text-primary" : "text-text-secondary")}>
+          {table.name}
+        </span>
+        <span className="shrink-0 text-xs text-text-muted">{table.schema}</span>
+        {rows && <span className="ml-auto text-xs tabular-nums text-text-muted">{rows}</span>}
+      </button>
+    </ContextMenu>
   );
 }
 

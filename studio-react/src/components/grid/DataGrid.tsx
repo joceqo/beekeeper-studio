@@ -6,6 +6,7 @@ import DataEditor, {
   GridColumn,
   GridSelection,
   GridMouseEventArgs,
+  HeaderClickedEventArgs,
   Item,
   Rectangle,
   Theme,
@@ -27,6 +28,7 @@ import {
   type SemanticType,
 } from "@/lib/relations";
 import { resolveSemanticType } from "@/lib/semantic";
+import { fillBars, type FillInfo } from "@/store/fillStats";
 import { useThemeStore } from "@/store/theme";
 import { useColumnConfigStore, formatCellValue } from "@/store/columnConfig";
 import { HEADER_ICONS, headerIconKey } from "./headerIcons";
@@ -117,6 +119,40 @@ function colWidth(c: ColumnDef): number {
   return 160;
 }
 
+// --- Header fill-bar glyph geometry (shared by width calc + drawHeader) ------
+// One source of truth so the column width reserves exactly the space drawHeader
+// uses, and the title never collides with the glyph or the hover menu chevron.
+const BAR_W = 3;
+const BAR_GAP = 2;
+const BAR_COUNT = 3;
+const BAR_GLYPH_W = BAR_COUNT * BAR_W + (BAR_COUNT - 1) * BAR_GAP; // 13px
+const HEAD_PAD_LEFT = 34; // left pad + semantic icon + gap before the title
+const HEAD_GAP = 10; // gap between the title and the glyph
+const HEAD_MENU_RESERVE = 24; // room at the right for the hover menu chevron
+
+/** Left x of the glyph for a header rect (right-anchored, clear of the menu). */
+function glyphX0(rectX: number, width: number): number {
+  return rectX + width - HEAD_MENU_RESERVE - BAR_GLYPH_W;
+}
+
+/** Measure header title width (cached 2D context), to size columns for the glyph. */
+let _measureCtx: CanvasRenderingContext2D | null = null;
+function measureTitle(title: string): number {
+  if (_measureCtx === null) {
+    const ctx = document.createElement("canvas").getContext("2d");
+    if (ctx) ctx.font = '600 12px "Inter Variable", ui-sans-serif, system-ui, sans-serif';
+    _measureCtx = ctx;
+  }
+  return _measureCtx ? _measureCtx.measureText(title).width : title.length * 7;
+}
+
+/** Column width wide enough for the title AND the fill-bar glyph + menu chevron. */
+function colWidthWithGlyph(c: ColumnDef, title: string): number {
+  const needed =
+    HEAD_PAD_LEFT + measureTitle(title) + HEAD_GAP + BAR_GLYPH_W + HEAD_MENU_RESERVE + 4;
+  return Math.max(colWidth(c), Math.ceil(needed));
+}
+
 export type SortDirection = "asc" | "desc";
 export interface SortState {
   column: string;
@@ -156,6 +192,8 @@ export interface DataGridProps {
   onConfigureColumn?: (column: ColumnDef) => void;
   /** Per-column value stats (top_values + nullFraction) for semantic inference. */
   stats?: Map<string, ColumnStats>;
+  /** Per-column completeness (fill rate), drawn as a 3-bar glyph in the header. */
+  fill?: Map<string, FillInfo>;
 }
 
 /** Write text to the clipboard, with a synchronous fallback. */
@@ -188,7 +226,6 @@ export function DataGrid({
   columns,
   rows,
   sort,
-  onSort,
   onRowSelect,
   onColumnSelect,
   relations = [],
@@ -201,6 +238,7 @@ export function DataGrid({
   onHideColumn,
   onConfigureColumn,
   stats,
+  fill,
 }: DataGridProps) {
   // re-derive theme when app theme flips
   const theme = useThemeStore((s) => s.theme);
@@ -274,10 +312,14 @@ export function DataGrid({
     const dataCols: GridColumn[] = visible.map(({ c }) => {
       const arrow = sort?.column === c.name ? (sort.direction === "asc" ? " ↑" : " ↓") : "";
       const sem = semanticOf(c);
+      const title = c.name + arrow;
+      // Only incomplete columns draw the glyph, so only they reserve room for it.
+      const info = fill?.get(c.name);
+      const showsGlyph = info != null && fillBars(info.ratio) < BAR_COUNT;
       return {
-        title: c.name + arrow,
+        title,
         id: c.name,
-        width: colWidth(c),
+        width: showsGlyph ? colWidthWithGlyph(c, title) : colWidth(c),
         // Custom header icon by semantic type (§4); FK uses the accent color.
         icon: headerIconKey(sem),
         // A menu indicator (the ⋮) opens the column-header context menu (Agent C).
@@ -301,7 +343,7 @@ export function DataGrid({
       },
     }));
     return [...dataCols, ...relCols];
-  }, [visible, sort, relations, semanticOf, hasHeaderMenu]);
+  }, [visible, sort, relations, semanticOf, hasHeaderMenu, fill]);
 
   const getCellContent = useCallback(
     ([col, row]: Item): GridCell => {
@@ -491,16 +533,35 @@ export function DataGrid({
     [visible, rows, columnConfig, relations, relationCounts, fkByColumn, semanticOf]
   );
 
+  const openHeaderMenu = useCallback(
+    (def: ColumnDef, bounds: Rectangle) => {
+      if (!hasHeaderMenu) return;
+      onColumnSelect?.(def.name);
+      setHeaderMenu({
+        column: def,
+        rect: { x: bounds.x, y: bounds.y + bounds.height, width: bounds.width },
+      });
+    },
+    [hasHeaderMenu, onColumnSelect]
+  );
+
   const onHeaderClicked = useCallback(
-    (colIndex: number) => {
-      // Relation columns aren't sortable data columns; ignore header clicks.
+    (colIndex: number, event?: HeaderClickedEventArgs) => {
+      // Relation columns aren't data columns; ignore header clicks.
       if (colIndex >= visible.length) return;
       const def = visible[colIndex]?.c;
       if (!def) return;
+      // A plain left-click opens the column menu (sort/filter/hide live inside it),
+      // matching the right-click / 2-finger gesture. Falls back to selecting the
+      // column when no menu actions are wired.
+      if (hasHeaderMenu && event?.bounds) {
+        event.preventDefault();
+        openHeaderMenu(def, event.bounds);
+        return;
+      }
       onColumnSelect?.(def.name);
-      if (onSort) onSort(def.name);
     },
-    [visible, onSort, onColumnSelect]
+    [visible, hasHeaderMenu, openHeaderMenu, onColumnSelect]
   );
 
   // Open the column-header context menu, anchored to the header cell's bounds
@@ -512,13 +573,20 @@ export function DataGrid({
       if (colIndex >= visible.length) return;
       const def = visible[colIndex]?.c;
       if (!def) return;
-      onColumnSelect?.(def.name);
-      setHeaderMenu({
-        column: def,
-        rect: { x: bounds.x, y: bounds.y + bounds.height, width: bounds.width },
-      });
+      openHeaderMenu(def, bounds);
     },
-    [hasHeaderMenu, visible, onColumnSelect]
+    [hasHeaderMenu, visible, openHeaderMenu]
+  );
+
+  // Right-click / 2-finger click on a header opens the same column menu.
+  const onHeaderContextMenu = useCallback(
+    (colIndex: number, event: HeaderClickedEventArgs) => {
+      event.preventDefault();
+      if (!hasHeaderMenu || colIndex >= visible.length) return;
+      const def = visible[colIndex]?.c;
+      if (def) openHeaderMenu(def, event.bounds);
+    },
+    [hasHeaderMenu, visible, openHeaderMenu]
   );
 
   // Build the menu entries for the focused header column.
@@ -573,6 +641,56 @@ export function DataGrid({
     }
     return items;
   }, [headerMenu, onSortColumn, onFilterColumn, onHideColumn, onConfigureColumn]);
+
+  // Draw the default header, then overlay a 3-bar "fill rate" signal glyph on the
+  // right (how complete this column is — non-null & non-empty). Lit bars scale
+  // with the filled fraction; skipped for relation columns and when no data yet.
+  const drawHeader = useCallback(
+    (
+      args: {
+        ctx: CanvasRenderingContext2D;
+        column: GridColumn;
+        rect: Rectangle;
+        menuBounds: Rectangle;
+        theme: Theme;
+      },
+      drawContent: () => void
+    ) => {
+      drawContent();
+      if (!fill) return;
+      const id = args.column.id;
+      if (!id || id.startsWith(REL_COL_PREFIX)) return;
+      const info = fill.get(id);
+      if (!info) return;
+      const lit = fillBars(info.ratio);
+      // Only flag incomplete columns — a fully-filled column draws no glyph, so
+      // the partial/empty ones stand out at a glance.
+      if (lit === BAR_COUNT) return;
+      const { ctx, rect } = args;
+      const x0 = glyphX0(rect.x, rect.width);
+      // Safety: if the column was resized so narrow the title would run under the
+      // glyph, skip it (the column detail still shows completeness).
+      const titleW = measureTitle(args.column.title ?? "");
+      if (rect.x + HEAD_PAD_LEFT + titleW + HEAD_GAP > x0) return;
+      const barH = 11;
+      const top = rect.y + (rect.height - barH) / 2;
+      const litColor = args.theme.accentColor ?? "#d95200";
+      const dimColor = args.theme.textLight ?? "#9aa0a6";
+      ctx.save();
+      for (let i = 0; i < BAR_COUNT; i++) {
+        if (i < lit) {
+          ctx.fillStyle = litColor;
+          ctx.globalAlpha = 0.95;
+        } else {
+          ctx.fillStyle = dimColor;
+          ctx.globalAlpha = 0.3;
+        }
+        ctx.fillRect(x0 + i * (BAR_W + BAR_GAP), top, BAR_W, barH);
+      }
+      ctx.restore();
+    },
+    [fill]
+  );
 
   const onCellClicked = useCallback(
     ([col, row]: Item) => {
@@ -650,6 +768,7 @@ export function DataGrid({
         theme={glide}
         headerIcons={HEADER_ICONS}
         customRenderers={SEMANTIC_RENDERERS}
+        drawHeader={drawHeader}
         getCellContent={getCellContent}
         columns={gridColumns}
         rows={rows.length}
@@ -664,6 +783,7 @@ export function DataGrid({
         gridSelection={gridSelection}
         onHeaderClicked={onHeaderClicked}
         onHeaderMenuClick={hasHeaderMenu ? onHeaderMenuClick : undefined}
+        onHeaderContextMenu={hasHeaderMenu ? onHeaderContextMenu : undefined}
         onCellClicked={onCellClicked}
         onItemHovered={onItemHovered}
         onGridSelectionChange={onGridSelectionChange}

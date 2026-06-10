@@ -4,6 +4,7 @@ import type {
   ColumnDef,
   Connection,
   ConnectionConfig,
+  DockerContainer,
   GetRecordsParams,
   GetRelationCountsParams,
   GetSchemaGraphOptions,
@@ -108,6 +109,21 @@ interface NgQueryResultDTO {
   rows?: Record<string, unknown>[];
   rowCount?: number;
   affectedRows?: number;
+}
+
+/** apps/studio/src/handlers/dockerHandlers.ts DockerDbContainer. */
+interface DockerDbContainerDTO {
+  id: string;
+  name: string;
+  image: string;
+  driver: "postgres" | "mysql" | "mariadb" | "sqlserver";
+  host: string;
+  port: number | null;
+  status: string;
+  running: boolean;
+  username?: string | null;
+  password?: string | null;
+  database?: string | null;
 }
 
 function kindFor(connectionType: string): Connection["kind"] {
@@ -237,6 +253,29 @@ export class ElectronBackendClient implements BackendClient {
     return conns;
   }
 
+  async listDockerContainers(): Promise<DockerContainer[]> {
+    try {
+      const raw = await this.send<DockerDbContainerDTO[]>("docker/listContainers", {});
+      return (raw ?? []).map((c) => ({
+        id: c.id,
+        name: c.name,
+        image: c.image,
+        // kindFor maps "mariadb" -> mysql so the UI's 4-engine union is honored.
+        kind: kindFor(c.driver),
+        host: c.host,
+        port: c.port,
+        status: c.status,
+        running: c.running,
+        username: c.username ?? null,
+        password: c.password ?? null,
+        database: c.database ?? null,
+      }));
+    } catch {
+      // Docker unavailable / handler missing — degrade to no containers.
+      return [];
+    }
+  }
+
   /**
    * Open the saved connection into this session via conn/create, mirroring the
    * Vue store's connect (store/index.ts:498). Idempotent and deduped: if the
@@ -302,6 +341,56 @@ export class ElectronBackendClient implements BackendClient {
         type: v.entityType === "materialized-view" ? "materialized-view" : "view",
         rowEstimate: 0,
       });
+    }
+    // Enrich with cheap row estimates (planner stats — no count(*) scan), so the
+    // sidebar + schema-graph picker can show "~N rows".
+    const estimates = await this.fetchRowEstimates(connectionId, schema);
+    if (estimates.size) {
+      for (const t of out) {
+        const e = estimates.get(`${t.schema}.${t.name}`);
+        if (e != null) t.rowEstimate = e;
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Best-effort per-table row estimates from planner statistics — Postgres
+   * `pg_class.reltuples`, MySQL `information_schema.tables.table_rows`. Cheap
+   * (catalog lookup, no count(*)). Returns a `schema.name -> rows` map; resolves
+   * empty on any error or unsupported engine.
+   */
+  private async fetchRowEstimates(
+    connectionId: string,
+    schema?: string
+  ): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    const type = (this.savedById.get(connectionId)?.connectionType ?? "").toLowerCase();
+    const esc = (s: string) => s.replace(/'/g, "''");
+    try {
+      let sql: string | null = null;
+      if (type === "postgres" || type === "postgresql" || type === "cockroachdb" || type === "redshift") {
+        const where = schema
+          ? `n.nspname = '${esc(schema)}'`
+          : `n.nspname NOT IN ('pg_catalog', 'information_schema')`;
+        sql =
+          `SELECT n.nspname AS schema, c.relname AS name, c.reltuples::bigint AS rows ` +
+          `FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace ` +
+          `WHERE c.relkind IN ('r', 'p', 'm') AND ${where}`;
+      } else if (type === "mysql" || type === "mariadb") {
+        const where = schema ? `table_schema = '${esc(schema)}'` : `table_schema = DATABASE()`;
+        sql =
+          "SELECT table_schema AS `schema`, table_name AS name, table_rows AS rows " +
+          `FROM information_schema.tables WHERE ${where}`;
+      }
+      if (!sql) return out;
+      const res = await this.runQuery(connectionId, sql);
+      for (const row of res.rows) {
+        const n = Number(row[2]);
+        out.set(`${String(row[0])}.${String(row[1])}`, Number.isFinite(n) && n > 0 ? n : 0);
+      }
+    } catch {
+      /* estimates are best-effort */
     }
     return out;
   }
