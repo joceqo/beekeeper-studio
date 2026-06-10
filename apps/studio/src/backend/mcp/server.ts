@@ -34,6 +34,8 @@ export interface McpServerOptions {
   host?: string;
   /** Fallback access level for connections without an explicit one. */
   defaultAccess?: McpAccess;
+  /** Allow the create_connection tool (off -> the tool is not registered). */
+  allowCreateConnections?: boolean;
   /** Server identity reported to MCP clients. */
   name?: string;
   version?: string;
@@ -100,7 +102,10 @@ export class BeekeeperMcpServer {
     this.name = opts.name ?? "beekeeper-studio";
     this.version = opts.version ?? "0.0.0";
     this.defaultAccess = opts.defaultAccess ?? "read";
-    const deps: ToolDeps = { defaultAccess: this.defaultAccess };
+    const deps: ToolDeps = {
+      defaultAccess: this.defaultAccess,
+      allowCreateConnections: opts.allowCreateConnections ?? false,
+    };
     this.tools = createTools(deps);
   }
 

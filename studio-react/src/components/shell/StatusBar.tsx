@@ -7,7 +7,7 @@ import { backend, type McpStatus } from "@/ipc";
 import { Popover, Button, cn, notify } from "@/ui";
 import { copyText } from "@/lib/clipboard";
 
-const VERSION = "v5.8.1";
+const VERSION = "v5.8.2";
 
 /** Copy text to the clipboard and report the outcome. */
 function copy(text: string) {

@@ -420,6 +420,7 @@ declare interface IBksConfig {
         };
     };
     mcp: {
+        allowCreateConnections: boolean;
         defaultAccess: string;
         enabled: boolean;
         port: number;

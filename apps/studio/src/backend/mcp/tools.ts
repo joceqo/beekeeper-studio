@@ -30,6 +30,8 @@ const DEFAULT_ROWS = 100;
 export interface ToolDeps {
   /** Fallback access level for connections that have no explicit `mcpAccess`. */
   defaultAccess: McpAccess;
+  /** When true, register the create_connection tool. */
+  allowCreateConnections: boolean;
 }
 
 export interface McpToolResult {
@@ -168,10 +170,129 @@ function requireExposed(sId: string, defaultAccess: McpAccess) {
   return { s, access };
 }
 
+/** Database types accepted by create_connection. */
+const CONNECTION_TYPES = [
+  "postgresql", "mysql", "mariadb", "tidb", "sqlite", "sqlserver", "oracle",
+  "cockroachdb", "redshift", "bigquery", "cassandra", "clickhouse", "duckdb",
+  "libsql", "mongodb", "firebird", "redis", "sqlanywhere",
+] as const;
+
+/**
+ * Create + persist a new saved connection (gated behind mcp.allowCreateConnections).
+ * Accepts either a connection url or explicit fields. New connections default to
+ * 'read' AI access; the caller may opt up to 'write'.
+ */
+function createConnectionTool(defaultAccess: McpAccess): McpTool {
+  return {
+    name: "create_connection",
+    description:
+      "Create and save a new database connection in Beekeeper Studio, then return its " +
+      "savedConnectionId (open it afterwards with the `connect` tool). Provide either a " +
+      "connection `url` (e.g. postgres://user:pass@host:5432/db) or explicit fields. Optionally " +
+      "tunnel over SSH (sshHost + sshMode 'agent'/'keyfile'/'userpass'). New connections default " +
+      "to 'read' AI access; pass mcpAccess='write' to allow writes over MCP.",
+    inputSchema: {
+      name: z.string().optional().describe("Display name (defaults to host/database)"),
+      url: z.string().optional().describe("Full connection string; alternative to the explicit fields"),
+      connectionType: z
+        .enum(CONNECTION_TYPES as unknown as [string, ...string[]])
+        .optional()
+        .describe("Database type, e.g. postgresql, mysql, sqlite, sqlserver, oracle"),
+      host: z.string().optional(),
+      port: z.number().int().optional(),
+      username: z.string().optional(),
+      password: z.string().optional(),
+      defaultDatabase: z
+        .string()
+        .optional()
+        .describe("Default database/schema, or the file path for sqlite/duckdb"),
+      mcpAccess: z
+        .enum(["read", "write"])
+        .optional()
+        .describe("AI access level for this connection (default 'read')"),
+      // SSH tunnel (optional). Providing sshHost enables the tunnel.
+      sshEnabled: z.boolean().optional().describe("Tunnel the connection over SSH"),
+      sshHost: z.string().optional().describe("SSH host (enables the tunnel if set)"),
+      sshPort: z.number().int().optional().describe("SSH port (default 22)"),
+      sshUsername: z.string().optional().describe("SSH username"),
+      sshMode: z
+        .enum(["agent", "keyfile", "userpass"])
+        .optional()
+        .describe("SSH auth mode (default 'agent' — uses the running ssh-agent)"),
+      sshKeyfile: z.string().optional().describe("Path to the private key (sshMode='keyfile')"),
+      sshKeyfilePassword: z.string().optional().describe("Passphrase for the private key"),
+      sshPassword: z.string().optional().describe("SSH password (sshMode='userpass')"),
+    },
+    async handler(args) {
+      const conn = new SavedConnection();
+      if (args.url) {
+        if (!conn.parse(String(args.url))) {
+          return fail("Unable to parse connection url.");
+        }
+      } else if (args.connectionType) {
+        conn.connectionType = String(args.connectionType) as SavedConnection["connectionType"];
+        if (args.host != null) conn.host = String(args.host);
+        if (args.port != null) conn.port = Number(args.port);
+        if (args.username != null) conn.username = String(args.username);
+        if (args.password != null) conn.password = String(args.password);
+        if (args.defaultDatabase != null) conn.defaultDatabase = String(args.defaultDatabase);
+      } else {
+        return fail("Provide either `url` or `connectionType` (plus host/credentials).");
+      }
+
+      // SSH tunnel: enabled explicitly, or implicitly when an sshHost is given.
+      const sshOn = (args.sshEnabled as boolean | undefined) ?? args.sshHost != null;
+      if (sshOn) {
+        conn.sshEnabled = true;
+        if (args.sshHost != null) conn.sshHost = String(args.sshHost);
+        if (args.sshPort != null) conn.sshPort = Number(args.sshPort);
+        if (args.sshUsername != null) conn.sshUsername = String(args.sshUsername);
+        // The sshMode setter clears mode-specific fields, so set it FIRST.
+        conn.sshMode = ((args.sshMode as SavedConnection["sshMode"]) ?? "agent");
+        if (conn.sshMode === "keyfile") {
+          if (args.sshKeyfile != null) conn.sshKeyfile = String(args.sshKeyfile);
+          if (args.sshKeyfilePassword != null) conn.sshKeyfilePassword = String(args.sshKeyfilePassword);
+        } else if (conn.sshMode === "userpass") {
+          if (args.sshPassword != null) conn.sshPassword = String(args.sshPassword);
+        }
+      }
+
+      conn.name =
+        (args.name != null ? String(args.name) : "") ||
+        conn.name ||
+        [conn.host, conn.defaultDatabase].filter(Boolean).join("/") ||
+        `${conn.connectionType} connection`;
+      conn.mcpAccess = (args.mcpAccess as McpAccess) ?? "read";
+
+      try {
+        await conn.save();
+      } catch (err) {
+        log.error("create_connection failed to save", err);
+        return fail(`Failed to save connection: ${(err as Error)?.message ?? err}`);
+      }
+
+      return ok({
+        savedConnectionId: conn.id,
+        name: conn.name,
+        connectionType: conn.connectionType,
+        host: conn.host ?? null,
+        port: conn.port ?? null,
+        database: conn.defaultDatabase ?? null,
+        mcpAccess: normalizeMcpAccess(conn.mcpAccess, defaultAccess),
+        ssh: conn.sshEnabled
+          ? { host: conn.sshHost, port: conn.sshPort, username: conn.sshUsername, mode: conn.sshMode }
+          : null,
+        hint: "Open it with the connect tool using this savedConnectionId.",
+      });
+    },
+  };
+}
+
 export function createTools(deps: ToolDeps): McpTool[] {
   const { defaultAccess } = deps;
 
   return [
+    ...(deps.allowCreateConnections ? [createConnectionTool(defaultAccess)] : []),
     {
       name: "list_saved_connections",
       description:

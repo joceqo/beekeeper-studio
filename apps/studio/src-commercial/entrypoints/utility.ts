@@ -236,6 +236,7 @@ async function startMcpServer() {
     mcpServer = new BeekeeperMcpServer({
       port,
       defaultAccess,
+      allowCreateConnections: !!mcpConfig.allowCreateConnections,
       version: platformInfo.appVersion,
     });
     const url = await mcpServer.start();
