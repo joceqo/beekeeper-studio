@@ -60,13 +60,18 @@ class BeekeeperWindow {
       show: false,
     })
 
-    // Phase C "C0": when BKS_REACT is set, load the studio-react renderer
-    // instead of the Vue app (REDESIGN.md Phase C). The same preload + the
-    // existing MessagePort handoff are reused, so the React renderer drives the
-    // real backend over the port. Unset -> the default Vue path below, untouched.
+    // Phase C "C0": load the studio-react renderer instead of the Vue app
+    // (REDESIGN.md Phase C). The same preload + the existing MessagePort handoff
+    // are reused, so the React renderer drives the real backend over the port.
     // dev  -> the studio-react Vite dev server (yarn dev, port 5273)
     // prod -> the built studio-react/dist/index.html loaded via file://
-    const reactRenderer = !!process.env.BKS_REACT
+    //
+    // This fork ships BeeTable (React), so packaged builds default to React.
+    // Dev stays opt-in via BKS_REACT so `yarn electron:serve` still runs Vue by
+    // default. BKS_VUE=1 forces the legacy Vue renderer in either case.
+    const reactRenderer = process.env.BKS_VUE === '1'
+      ? false
+      : (!!process.env.BKS_REACT || !platformInfo.isDevelopment)
     const reactDevUrl = process.env.BKS_REACT_URL || 'http://localhost:5273'
 
     const devUrl = 'http://localhost:3003'
@@ -76,12 +81,13 @@ class BeekeeperWindow {
     if (reactRenderer) {
       // prod: studio-react/dist is shipped via electron-builder extraResources
       // (electron-builder-config.js -> to: "studio-react"), landing in
-      // process.resourcesPath. extraResources is used (not files/asar) because
-      // file:// cannot read assets packed inside app.asar.
-      const reactProdPath = path.join(process.resourcesPath, 'studio-react', 'index.html')
+      // process.resourcesPath, and served over the app-react:// protocol
+      // (ProtocolBuilder.createReactProtocol). A custom standard+secure scheme
+      // is required instead of file://, which Chromium blocks for ES module
+      // scripts (null origin / CORS) -> white screen.
       appUrl = platformInfo.isDevelopment
         ? reactDevUrl
-        : `file://${reactProdPath}`
+        : 'app-react://./index.html'
     }
     const queryObj: any = openOptions ? { ...openOptions } : {}
 

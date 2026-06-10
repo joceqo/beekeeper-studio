@@ -119,12 +119,15 @@ let menuHandler
 log.debug("registering schema")
 // Scheme must be registered before the app is ready
 protocol.registerSchemesAsPrivileged([{scheme: 'app', privileges: { secure: true, standard: true } }])
+protocol.registerSchemesAsPrivileged([{scheme: 'app-react', privileges: { secure: true, standard: true } }])
 protocol.registerSchemesAsPrivileged([{scheme: 'plugin', privileges: { secure: true, standard: true } }])
 let initialized = false
 
 async function initBasics() {
   // this creates the app:// protocol we use for loading assets
   ProtocolBuilder.createAppProtocol()
+  // this creates the app-react:// protocol for the studio-react renderer
+  ProtocolBuilder.createReactProtocol()
   // this creates the plugin:// protocol we use for loading plugins
   ProtocolBuilder.createPluginProtocol()
   if (initialized) return settings

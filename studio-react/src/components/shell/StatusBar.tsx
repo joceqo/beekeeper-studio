@@ -1,24 +1,29 @@
 import { useEffect, useState } from "react";
-import { BrainCircuit, AlertTriangle } from "lucide-react";
+import { BrainCircuit, Database, Copy } from "lucide-react";
 import { useStatusStore } from "@/store/status";
 import { useActivityStore } from "@/store/activity";
 import { useLayoutStore } from "@/store/layout";
 import { backend, type McpStatus } from "@/ipc";
-import { Popover, Button, cn } from "@/ui";
+import { Popover, Button, cn, notify } from "@/ui";
+import { copyText } from "@/lib/clipboard";
 
-const VERSION = "v5.8.0";
+const VERSION = "v5.8.1";
 
-/** Copy text to the clipboard (best-effort, async). */
+/** Copy text to the clipboard and report the outcome. */
 function copy(text: string) {
-  navigator.clipboard?.writeText(text).catch(() => {});
+  copyText(text).then((ok) =>
+    ok ? notify.success("Copied MCP config") : notify.error("Copy failed")
+  );
 }
 
 /** A labeled key/value row in the MCP popover. */
 function StatRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-4 py-1">
-      <span className="text-text-muted">{label}</span>
-      <span className="font-mono tabular-nums text-text-primary">{children}</span>
+    <div className="flex items-baseline justify-between gap-4 py-2">
+      <span className="text-sm text-text-muted">{label}</span>
+      <span className="font-mono text-[15px] tabular-nums text-text-primary">
+        {children}
+      </span>
     </div>
   );
 }
@@ -49,8 +54,10 @@ function McpPopover() {
 
   const running = status?.running ?? false;
   const config = status?.url
-    ? JSON.stringify({ beekeeper: { type: "http", url: status.url } }, null, 2)
+    ? JSON.stringify({ beetable: { type: "http", url: status.url } }, null, 2)
     : "";
+  // Full host:port (e.g. 127.0.0.1:27500), matching SlashTable's MCP panel.
+  const hostPort = status?.url ? new URL(status.url).host : "—";
 
   const trigger = (
     <button
@@ -69,42 +76,49 @@ function McpPopover() {
 
   return (
     <Popover trigger={trigger} side="top" align="end" className="w-72" open={open} onOpenChange={setOpen}>
-      <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-text-muted">
+      <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-text-muted">
         MCP Server
       </div>
-      <StatRow label="Port">{status?.url ? `${status.port ?? "—"}` : "—"}</StatRow>
-      <StatRow label="Requests">
-        {status?.requests ?? 0} total
-        {status && status.errors > 0 && (
-          <span className="text-danger"> · {status.errors} err</span>
-        )}
-      </StatRow>
-      <StatRow label="Last call">
-        {status?.lastCall ? `${status.lastCall.name} · ${status.lastCall.durationMs}ms` : "—"}
-      </StatRow>
+      <div className="divide-y divide-border/60">
+        <StatRow label="Port">{hostPort}</StatRow>
+        <StatRow label="Requests">
+          {status?.requests ?? 0} total
+          {status && status.errors > 0 && (
+            <span className="text-danger"> · {status.errors} err</span>
+          )}
+        </StatRow>
+        <StatRow label="Last call">
+          {status?.lastCall
+            ? `${status.lastCall.name} · ${status.lastCall.durationMs}ms`
+            : "—"}
+        </StatRow>
+      </div>
 
       {status && status.writeConnections.length > 0 && (
-        <div className="mt-1.5 flex items-start gap-1.5 rounded border border-border bg-bg-primary/40 px-2 py-1.5 text-text-secondary">
-          <AlertTriangle size={13} className="mt-0.5 shrink-0 text-warning" />
-          <span>
-            {status.writeConnections.length} connection
-            {status.writeConnections.length > 1 ? "s" : ""} allow writes
-            <span className="block font-mono text-text-muted">
-              {status.writeConnections.join(", ")}
+        <div className="mt-2 border-t border-border pt-2.5">
+          <div className="flex items-center gap-1.5 text-warning">
+            <Database size={13} className="shrink-0" />
+            <span>
+              {status.writeConnections.length} connection
+              {status.writeConnections.length === 1 ? " allows" : "s allow"} writes
             </span>
-          </span>
+          </div>
+          <div className="mt-1 font-mono text-text-secondary">
+            {status.writeConnections.join(", ")}
+          </div>
         </div>
       )}
 
-      <div className="mt-2 flex flex-col gap-1">
+      <div className="mt-2 flex flex-col border-t border-border pt-1">
         <Button
           variant="ghost"
           size="sm"
-          className="w-full justify-start"
+          className="w-full justify-start gap-2"
           disabled={!config}
           onClick={() => copy(config)}
         >
           Copy config
+          <Copy size={13} className="text-text-muted" />
         </Button>
         <Button
           variant="ghost"

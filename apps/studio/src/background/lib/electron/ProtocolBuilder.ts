@@ -28,63 +28,72 @@ function mimeTypeOf(pathName: string) {
   }
 }
 
+// Serve a static SPA from `rootDir` over a standard+secure scheme. Used for
+// both the Vue (`app://`) and React (`app-react://`) renderers. A custom scheme
+// is required instead of `file://` because Chromium blocks ES module scripts
+// loaded over file:// (null origin / CORS), which shows up as a white screen.
+function registerStaticProtocol(scheme: string, getRootDir: () => string) {
+  protocol.registerBufferProtocol(scheme, (request, respond) => {
+    let pathName = new URL(request.url).pathname
+    pathName = decodeURI(pathName) // Needed in case URL contains spaces
+
+    const emptySourceMap = JSON.stringify({
+      version: 3,
+      file: request.url,
+      sources: [],
+      names: [],
+      mappings: ''
+    });
+
+    // Resolve under the renderer root and refuse anything that escapes it.
+    const distRoot = path.resolve(getRootDir())
+    const normalizedPath = path.resolve(path.join(distRoot, pathName))
+    log.debug("resolving", pathName, 'to', normalizedPath)
+    const extension = path.extname(pathName).toLowerCase()
+
+    if (
+      normalizedPath !== distRoot &&
+      !normalizedPath.startsWith(distRoot + path.sep)
+    ) {
+      if (extension === '.map') {
+        respond({
+          mimeType: 'application/json',
+          data: Buffer.from(emptySourceMap),
+        })
+        return
+      }
+      respond({ error: -6 })
+      return
+    }
+
+    readFile(normalizedPath, (error, data) => {
+      if (error && extension === '.map') {
+        respond({
+          mimeType: 'application/json',
+          data: Buffer.from(emptySourceMap),
+        })
+        return
+      }
+      respond({
+        mimeType: mimeTypeOf(pathName),
+        data,
+      })
+    })
+  })
+}
+
 export const ProtocolBuilder = {
 
-  // app:// loads from dist/renderer
+  // app:// loads the Vue renderer from dist/renderer (inside app.asar)
   createAppProtocol: () => {
-    protocol.registerBufferProtocol(
-      'app',
-      (request, respond) => {
-        let pathName = new URL(request.url).pathname
-        pathName = decodeURI(pathName) // Needed in case URL contains spaces
+    registerStaticProtocol('app', () => path.join(__dirname, 'renderer'))
+  },
 
-        const emptySourceMap = JSON.stringify({
-          version: 3,
-          file: request.url,
-          sources: [],
-          names: [],
-          mappings: ''
-        });
-
-        // our app runs from dist/, regardless of whether this is inside of the
-        // app.asar file, but we want to not allow loading of content from outside of
-        // the dist directory
-        const distRoot = path.resolve(path.join(__dirname, 'renderer'))
-        const normalizedPath = path.resolve(path.join(distRoot, pathName))
-        log.debug("resolving", pathName, 'to', normalizedPath)
-        const extension = path.extname(pathName).toLowerCase()
-
-        // Containment check: refuse anything that escapes dist/renderer.
-        if (
-          normalizedPath !== distRoot &&
-          !normalizedPath.startsWith(distRoot + path.sep)
-        ) {
-          if (extension === '.map') {
-            respond({
-              mimeType: 'application/json',
-              data: Buffer.from(emptySourceMap),
-            })
-            return
-          }
-          respond({ error: -6 })
-          return
-        }
-
-        readFile(normalizedPath, (error, data) => {
-          if (error && extension === '.map') {
-            respond({
-              mimeType: 'application/json',
-              data: Buffer.from(emptySourceMap),
-            })
-            return
-          }
-          respond({
-            mimeType: mimeTypeOf(pathName),
-            data,
-          })
-        })
-      }
-    )
+  // app-react:// loads the studio-react renderer, shipped via extraResources to
+  // <resources>/studio-react (electron-builder-config.js). Mirrors app:// so the
+  // React renderer gets a real secure origin and its ES modules load.
+  createReactProtocol: () => {
+    registerStaticProtocol('app-react', () => path.join(process.resourcesPath, 'studio-react'))
   },
   createPluginProtocol: () => {
     protocol.registerBufferProtocol("plugin", (request, respond) => {

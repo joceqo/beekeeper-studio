@@ -25,6 +25,11 @@ module.exports = {
   releaseInfo: {
     releaseNotesFile: "build/release-notes.md"
   },
+  // The app dir is the source dir, so electron-builder's default package.json
+  // rewrite (removePackageScripts/Keywords) edits the source in place, wiping
+  // scripts + devDependencies. Disable it so builds aren't destructive.
+  removePackageScripts: false,
+  removePackageKeywords: false,
   generateUpdatesFilesForAllChannels: true,
   directories: {
     output: "dist_electron"

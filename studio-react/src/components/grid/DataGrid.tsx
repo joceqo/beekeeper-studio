@@ -28,6 +28,7 @@ import {
   type SemanticType,
 } from "@/lib/relations";
 import { resolveSemanticType } from "@/lib/semantic";
+import { copyText } from "@/lib/clipboard";
 import { fillBars, type FillInfo } from "@/store/fillStats";
 import { useThemeStore } from "@/store/theme";
 import { useColumnConfigStore, formatCellValue } from "@/store/columnConfig";
@@ -194,29 +195,6 @@ export interface DataGridProps {
   stats?: Map<string, ColumnStats>;
   /** Per-column completeness (fill rate), drawn as a 3-bar glyph in the header. */
   fill?: Map<string, FillInfo>;
-}
-
-/** Write text to the clipboard, with a synchronous fallback. */
-function copyText(text: string) {
-  if (navigator.clipboard?.writeText) {
-    navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
-  } else {
-    fallbackCopy(text);
-  }
-}
-function fallbackCopy(text: string) {
-  const ta = document.createElement("textarea");
-  ta.value = text;
-  ta.style.position = "fixed";
-  ta.style.opacity = "0";
-  document.body.appendChild(ta);
-  ta.select();
-  try {
-    document.execCommand("copy");
-  } catch {
-    /* ignore */
-  }
-  document.body.removeChild(ta);
 }
 
 const REL_COL_PREFIX = "__rel__:";

@@ -35,6 +35,7 @@ import {
   formatRowEstimate,
   type ExplorerNode,
 } from "@/lib/explorer";
+import { copyText } from "@/lib/clipboard";
 import {
   cn,
   IconButton,
@@ -85,12 +86,9 @@ function TableIcon({ type }: { type: TableSummary["type"] }) {
 
 /** Copy text to the clipboard with a confirmation toast. */
 function copyToClipboard(text: string, label: string) {
-  const done = () => notify.success(`Copied ${label}`);
-  if (navigator.clipboard?.writeText) {
-    navigator.clipboard.writeText(text).then(done, () => notify.error("Copy failed"));
-  } else {
-    done();
-  }
+  copyText(text).then((ok) =>
+    ok ? notify.success(`Copied ${label}`) : notify.error("Copy failed")
+  );
 }
 
 /** Right-click menu for a table row (matches SlashTable's table context menu). */
