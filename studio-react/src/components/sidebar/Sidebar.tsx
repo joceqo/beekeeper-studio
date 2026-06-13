@@ -13,6 +13,7 @@ import {
   Plus,
   Workflow,
   Pencil,
+  Copy,
   Trash2,
   Loader2,
   Star,
@@ -441,6 +442,11 @@ export function Sidebar() {
     const isOpen = expanded[c.id];
     const menu: MenuEntry[] = [
       { label: "Edit…", icon: <Pencil size={13} />, onSelect: () => openConnection(c.id) },
+      {
+        label: "Duplicate…",
+        icon: <Copy size={13} />,
+        onSelect: () => openConnection(undefined, c.id),
+      },
       { type: "separator" },
       {
         label: "Delete",

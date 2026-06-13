@@ -115,8 +115,17 @@ function aiFromMcp(a?: string): AiAccess {
   return a === "none" ? "Hidden" : a === "write" ? "Write" : "Read";
 }
 
-export function ConnectionScreen({ editConnectionId }: { editConnectionId?: string }) {
+export function ConnectionScreen({
+  editConnectionId,
+  duplicateConnectionId,
+}: {
+  editConnectionId?: string;
+  duplicateConnectionId?: string;
+}) {
   const isEdit = !!editConnectionId;
+  // Edit loads in place; duplicate seeds a NEW connection from an existing one's fields.
+  const sourceId = editConnectionId ?? duplicateConnectionId;
+  const isDuplicate = !editConnectionId && !!duplicateConnectionId;
   const [engine, setEngine] = useState<Engine>("postgres");
   const [ai, setAi] = useState<AiAccess>("Read");
   const defaultPort = ENGINES.find((e) => e.id === engine)?.defaultPort ?? "";
@@ -153,18 +162,19 @@ export function ConnectionScreen({ editConnectionId }: { editConnectionId?: stri
 
   const isSqlite = engine === "sqlite";
 
-  // Prefill from the saved connection when editing.
+  // Prefill from the saved connection when editing or duplicating.
   useEffect(() => {
-    if (!editConnectionId) return;
+    if (!sourceId) return;
     let cancelled = false;
     backend
-      .getConnectionConfig(editConnectionId)
+      .getConnectionConfig(sourceId)
       .then((cfg) => {
         if (cancelled || !cfg) return;
-        setBaseConfig(cfg);
+        // When duplicating, drop the id so saving creates a new connection.
+        setBaseConfig(isDuplicate ? { ...cfg, id: undefined } : cfg);
         setEngine(engineFromType(cfg.connectionType));
         setAi(aiFromMcp(cfg.mcpAccess));
-        setName(cfg.name ?? "");
+        setName(isDuplicate ? `${cfg.name ?? "Connection"} (Copy)` : (cfg.name ?? ""));
         setUrl((cfg.url as string) ?? "");
         setHost(cfg.host ?? "");
         setPort(cfg.port != null ? String(cfg.port) : "");
@@ -184,7 +194,7 @@ export function ConnectionScreen({ editConnectionId }: { editConnectionId?: stri
     return () => {
       cancelled = true;
     };
-  }, [editConnectionId]);
+  }, [sourceId, isDuplicate]);
 
   /** Assemble a full backend config: start from the edited/default base, overlay the form. */
   async function buildConfig(): Promise<ConnectionConfig> {

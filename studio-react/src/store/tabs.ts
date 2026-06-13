@@ -89,6 +89,8 @@ export interface Tab {
   rootSchema?: string;
   /** for connection tabs: the saved connection being edited (absent = new). */
   editConnectionId?: string;
+  /** for connection tabs: the saved connection whose fields seed a NEW connection. */
+  duplicateConnectionId?: string;
   /** for query tabs, persisted editor text */
   sql?: string;
   /**
@@ -120,7 +122,7 @@ interface TabsState {
   bootstrap: () => Promise<void>;
   openTable: (connectionId: string, schema: string, table: string) => void;
   openQuery: () => void;
-  openConnection: (editConnectionId?: string) => void;
+  openConnection: (editConnectionId?: string, duplicateConnectionId?: string) => void;
   openGraph: (
     connectionId: string,
     schema?: string,
@@ -321,7 +323,7 @@ export const useTabsStore = create<TabsState>((set, get) => ({
     set((s) => ({ tabs: [...s.tabs, tab], activeId: tab.id }));
   },
 
-  openConnection: (editConnectionId?: string) => {
+  openConnection: (editConnectionId?: string, duplicateConnectionId?: string) => {
     const title = editConnectionId ? "Edit Connection" : "New Connection";
     // Reuse the single connection tab, repurposing it for the requested mode.
     const existing = get().tabs.find((t) => t.kind === "connection");
@@ -329,12 +331,20 @@ export const useTabsStore = create<TabsState>((set, get) => ({
       set((s) => ({
         activeId: existing.id,
         tabs: s.tabs.map((t) =>
-          t.id === existing.id ? { ...t, title, editConnectionId } : t
+          t.id === existing.id
+            ? { ...t, title, editConnectionId, duplicateConnectionId }
+            : t
         ),
       }));
       return;
     }
-    const tab: Tab = { id: nextId("conn"), kind: "connection", title, editConnectionId };
+    const tab: Tab = {
+      id: nextId("conn"),
+      kind: "connection",
+      title,
+      editConnectionId,
+      duplicateConnectionId,
+    };
     set((s) => ({ tabs: [...s.tabs, tab], activeId: tab.id }));
   },
 
