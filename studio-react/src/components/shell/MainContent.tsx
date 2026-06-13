@@ -3,7 +3,6 @@ import { TableView } from "@/components/grid/TableView";
 import { RelationView } from "@/components/grid/RelationView";
 import { SchemaGraphView } from "@/components/grid/SchemaGraphView";
 import { QueryEditor } from "@/components/editor/QueryEditor";
-import { ConnectionScreen } from "@/components/connection/ConnectionScreen";
 
 export function MainContent() {
   const tabs = useTabsStore((s) => s.tabs);
@@ -57,11 +56,11 @@ export function MainContent() {
     return <QueryEditor key={tab.id} tabId={tab.id} sql={tab.sql ?? ""} />;
   }
 
+  // Connection editing is handled by the modal overlay (see ConnectionModal),
+  // not a tab — any other tab kind falls back to an empty state.
   return (
-    <ConnectionScreen
-      key={tab.id}
-      editConnectionId={tab.editConnectionId}
-      duplicateConnectionId={tab.duplicateConnectionId}
-    />
+    <div className="flex h-full items-center justify-center text-md text-text-muted">
+      No tab open. Use the + button to start a query.
+    </div>
   );
 }

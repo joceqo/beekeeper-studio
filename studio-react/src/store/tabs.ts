@@ -108,9 +108,20 @@ export interface Tab {
   historyIndex?: number;
 }
 
+/** The connection editor modal: closed, or open in new/edit/duplicate mode. */
+export interface ConnectionModalState {
+  open: boolean;
+  /** Editing a saved connection in place (absent = new). */
+  editConnectionId?: string;
+  /** Seeding a NEW connection from an existing one's fields. */
+  duplicateConnectionId?: string;
+}
+
 interface TabsState {
   tabs: Tab[];
   activeId: string | null;
+  /** Connection editor modal state (SlashTable-style overlay, not a tab). */
+  connectionModal: ConnectionModalState;
   /** True once the startup connection/table has been resolved (or skipped). */
   bootstrapped: boolean;
   /**
@@ -123,6 +134,7 @@ interface TabsState {
   openTable: (connectionId: string, schema: string, table: string) => void;
   openQuery: () => void;
   openConnection: (editConnectionId?: string, duplicateConnectionId?: string) => void;
+  closeConnectionModal: () => void;
   openGraph: (
     connectionId: string,
     schema?: string,
@@ -273,6 +285,7 @@ const initialTab: Tab = {
 export const useTabsStore = create<TabsState>((set, get) => ({
   tabs: [initialTab],
   activeId: initialTab.id,
+  connectionModal: { open: false },
   bootstrapped: false,
 
   bootstrap: async () => {
@@ -324,28 +337,12 @@ export const useTabsStore = create<TabsState>((set, get) => ({
   },
 
   openConnection: (editConnectionId?: string, duplicateConnectionId?: string) => {
-    const title = editConnectionId ? "Edit Connection" : "New Connection";
-    // Reuse the single connection tab, repurposing it for the requested mode.
-    const existing = get().tabs.find((t) => t.kind === "connection");
-    if (existing) {
-      set((s) => ({
-        activeId: existing.id,
-        tabs: s.tabs.map((t) =>
-          t.id === existing.id
-            ? { ...t, title, editConnectionId, duplicateConnectionId }
-            : t
-        ),
-      }));
-      return;
-    }
-    const tab: Tab = {
-      id: nextId("conn"),
-      kind: "connection",
-      title,
-      editConnectionId,
-      duplicateConnectionId,
-    };
-    set((s) => ({ tabs: [...s.tabs, tab], activeId: tab.id }));
+    // Connection editing is a modal overlay (SlashTable-style), not a tab.
+    set({ connectionModal: { open: true, editConnectionId, duplicateConnectionId } });
+  },
+
+  closeConnectionModal: () => {
+    set({ connectionModal: { open: false } });
   },
 
   openGraph: (connectionId, schema, rootTable, rootSchema) => {

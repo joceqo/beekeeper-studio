@@ -59,6 +59,17 @@ interface MainBridge {
   attachPortListener: () => void;
   requestPorts: () => void;
   fetchUsername?: () => Promise<string>;
+  /**
+   * Native open-file dialog (preload → main `dialog.showOpenDialogSync`).
+   * Returns the selected paths, or undefined when cancelled. Present only in
+   * the desktop app, so callers must guard on it.
+   */
+  showOpenDialogSync?: (args: {
+    properties?: string[];
+    filters?: { name: string; extensions: string[] }[];
+    defaultPath?: string;
+    title?: string;
+  }) => string[] | undefined;
 }
 
 declare global {

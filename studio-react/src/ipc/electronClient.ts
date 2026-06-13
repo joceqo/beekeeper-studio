@@ -24,6 +24,7 @@ import type {
 } from "./types";
 import type { BackendTransport } from "./transport";
 import { focusGraph } from "@/lib/graph";
+import { paintForLabelColor } from "@/lib/labelColors";
 
 /**
  * BackendClient implementation that drives Beekeeper Studio's REAL backend over
@@ -247,6 +248,7 @@ export class ElectronBackendClient implements BackendClient {
         kind: kindFor(c.connectionType),
         host: host ?? undefined,
         database: c.defaultDatabase ?? undefined,
+        paint: paintForLabelColor(c.labelColor),
         connected: this.connected.has(uiId),
       });
     }
@@ -644,6 +646,7 @@ export class ElectronBackendClient implements BackendClient {
       kind: kindFor(saved.connectionType),
       host: host ?? undefined,
       database: saved.defaultDatabase ?? undefined,
+      paint: paintForLabelColor(saved.labelColor),
       connected: this.connected.has(uiId),
     };
   }

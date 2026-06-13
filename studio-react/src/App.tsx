@@ -19,6 +19,7 @@ import { useGlobalKeybindings } from "@/lib/keymap";
 import { CommandPalette } from "@/components/palette/CommandPalette";
 import { ConnectionSwitcher } from "@/components/palette/ConnectionSwitcher";
 import { SettingsDialog } from "@/components/palette/SettingsDialog";
+import { ConnectionModal } from "@/components/connection/ConnectionModal";
 import { TooltipProvider, Toaster } from "@/ui";
 
 /** Thin resize handle styled with the design tokens: subtle line, accent on hover/drag. */
@@ -50,6 +51,7 @@ function CommandLayer() {
       <CommandPalette />
       <ConnectionSwitcher />
       <SettingsDialog />
+      <ConnectionModal />
     </>
   );
 }
