@@ -278,6 +278,11 @@ export class ElectronBackendClient implements BackendClient {
     }
   }
 
+  onDockerChange(cb: () => void): () => void {
+    const id = this.transport.addListener("docker/containersChanged", () => cb());
+    return () => this.transport.removeListener(id);
+  }
+
   /**
    * Open the saved connection into this session via conn/create, mirroring the
    * Vue store's connect (store/index.ts:498). Idempotent and deduped: if the

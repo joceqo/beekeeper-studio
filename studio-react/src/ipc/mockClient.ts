@@ -340,6 +340,11 @@ export class MockBackendClient implements BackendClient {
     ];
   }
 
+  onDockerChange(_cb: () => void): () => void {
+    // No backend event channel in the mock; containers are static.
+    return () => {};
+  }
+
   async listSchemas(_connectionId: string) {
     await delay(jitter(40, 120));
     return structuredClone(MOCK_SCHEMAS);

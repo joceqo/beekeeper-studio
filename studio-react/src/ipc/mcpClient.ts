@@ -328,6 +328,11 @@ export class McpBackendClient implements BackendClient {
     return [];
   }
 
+  onDockerChange(_cb: () => void): () => void {
+    // No Docker event channel over MCP; no-op.
+    return () => {};
+  }
+
   async listConnections(): Promise<Connection[]> {
     const saved = await this.callTool<SavedConnectionDTO[]>("list_saved_connections");
     return saved.map((c) => ({

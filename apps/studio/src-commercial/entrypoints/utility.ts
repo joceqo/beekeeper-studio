@@ -30,6 +30,7 @@ import PluginFileManager from '@/services/plugin/PluginFileManager';
 import { DriverDepHandlers } from '@/handlers/driverDepHandlers';
 import { McpHandlers } from '@/handlers/mcpHandlers';
 import { DockerHandlers } from '@/handlers/dockerHandlers';
+import { startDockerWatcher } from '@/handlers/dockerWatcher';
 import { DriverDepManager, DriverDepFileManager, createDefaultRegistry } from '@/services/driverDeps';
 import type { DepPlatform, DepArch } from '@/services/driverDeps';
 import BksConfig from '@/common/bksConfig';
@@ -205,9 +206,30 @@ async function initState(sId: string, port: MessagePortMain) {
   state(sId).port.start();
 }
 
+/**
+ * Push a "Docker containers changed" event to every open window. Child
+ * connection sIds ("<sId>#<connId>") share their window's port, so we push once
+ * per top-level window to avoid duplicate refreshes. No reply id → the renderer
+ * transport routes it to onDockerChange listeners by type.
+ */
+function broadcastDockerChange() {
+  for (const id of allStateIds()) {
+    if (id.includes('#')) continue;
+    try {
+      const port = state(id)?.port;
+      if (port) port.postMessage({ type: 'docker/containersChanged' });
+    } catch (e) {
+      log.debug('docker change push failed for', id, e);
+    }
+  }
+}
+
 async function init() {
   ormConnection = new ORMConnection(platformInfo.appDbPath, false);
   await ormConnection.connect();
+
+  // Event-driven Docker DB detection (tails `docker events`).
+  startDockerWatcher(broadcastDockerChange);
 
   pluginManager.initialize().catch((e) => {
     log.error("Error initializing plugin manager", e);

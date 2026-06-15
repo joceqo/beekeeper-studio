@@ -192,14 +192,37 @@ export function Sidebar() {
   }, [connectionsRevision]);
 
   // Detect running Docker DB containers (best-effort; empty when Docker is off).
+  // Event-driven: the backend tails `docker events` and pushes onDockerChange
+  // whenever a container starts/stops/dies, so containers spun up after the app
+  // is open appear near-instantly without polling. A window-focus refresh is
+  // kept as a cheap belt-and-suspenders. State only updates when the list
+  // actually changed, to avoid needless sidebar re-renders.
   useEffect(() => {
     let cancelled = false;
-    backend
-      .listDockerContainers()
-      .then((c) => !cancelled && setDockerContainers(c))
-      .catch(() => !cancelled && setDockerContainers([]));
+    let lastSig = "";
+    const refresh = () => {
+      backend
+        .listDockerContainers()
+        .then((c) => {
+          if (cancelled) return;
+          const sig = JSON.stringify(c);
+          if (sig === lastSig) return;
+          lastSig = sig;
+          setDockerContainers(c);
+        })
+        .catch(() => {
+          if (cancelled || lastSig === "[]") return;
+          lastSig = "[]";
+          setDockerContainers([]);
+        });
+    };
+    refresh();
+    const unsubscribe = backend.onDockerChange(refresh);
+    window.addEventListener("focus", refresh);
     return () => {
       cancelled = true;
+      unsubscribe();
+      window.removeEventListener("focus", refresh);
     };
   }, [connectionsRevision]);
 

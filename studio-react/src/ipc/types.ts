@@ -307,6 +307,14 @@ export interface BackendClient {
    */
   listDockerContainers(): Promise<DockerContainer[]>;
   /**
+   * Subscribe to backend "Docker containers changed" push events (driven by the
+   * `docker events` stream). The callback fires whenever a container
+   * starts/stops/dies; re-call listDockerContainers() to get the new list.
+   * Returns an unsubscribe fn. Implementations without a backend channel (mock)
+   * may no-op.
+   */
+  onDockerChange(cb: () => void): () => void;
+  /**
    * Open/resolve a saved connection, mapping the UI connection id (e.g. a saved
    * id) to the live backend connectionId. Must be awaited before any
    * schema/data call so requests never fire with an unresolved id. Returns the
