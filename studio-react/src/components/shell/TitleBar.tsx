@@ -28,7 +28,7 @@ function ConnectionIndicator() {
     <button
       onClick={() => openSwitcher(true)}
       title="Switch connection  ⌘D"
-      className="flex shrink-0 items-center gap-1.5 border-r border-border px-3 text-md hover:bg-bg-hover"
+      className="flex shrink-0 items-center gap-1.5 border-r border-border px-3 text-md hover:bg-bg-hover [-webkit-app-region:no-drag]"
     >
       {connecting ? (
         <Loader2 size={11} className="shrink-0 animate-spin text-text-muted" />
@@ -63,7 +63,7 @@ export function TitleBar() {
   const openSettings = useUiStore((s) => s.setSettingsOpen);
 
   return (
-    <div className="flex h-8 shrink-0 items-stretch border-b border-border bg-bg-secondary">
+    <div className="flex h-8 shrink-0 items-stretch border-b border-border bg-bg-secondary [-webkit-app-region:drag]">
       {/* macOS traffic-light inset */}
       <div className="flex w-[74px] shrink-0 items-center gap-2 pl-3">
         <span className="h-3 w-3 rounded-full bg-[#ff5f57]" />
@@ -75,7 +75,7 @@ export function TitleBar() {
 
       <TabStrip />
 
-      <div className="flex shrink-0 items-center gap-0.5 px-2">
+      <div className="flex shrink-0 items-center gap-0.5 px-2 [-webkit-app-region:no-drag]">
         <Tooltip content="Command palette  ⌘K">
           <IconButton size="lg" onClick={() => openPalette(true)} aria-label="Command palette">
             <Command size={15} />

@@ -28,7 +28,7 @@ export function TabStrip() {
               key={t.id}
               onClick={() => setActive(t.id)}
               className={cn(
-                "group relative flex h-8 max-w-[200px] shrink-0 cursor-pointer items-center gap-1.5 border-r border-border px-3 text-md transition-colors duration-100 ease-out",
+                "group relative flex h-8 max-w-[200px] shrink-0 cursor-pointer items-center gap-1.5 border-r border-border px-3 text-md transition-colors duration-100 ease-out [-webkit-app-region:no-drag]",
                 active
                   ? "bg-bg-primary text-text-primary"
                   : "bg-bg-secondary text-text-muted hover:bg-bg-hover hover:text-text-secondary"
@@ -62,7 +62,7 @@ export function TabStrip() {
           <IconButton
             size="lg"
             aria-label="New tab"
-            className="ml-0.5 h-8 w-8 shrink-0 rounded-none text-text-muted"
+            className="ml-0.5 h-8 w-8 shrink-0 rounded-none text-text-muted [-webkit-app-region:no-drag]"
           >
             <Plus size={15} />
           </IconButton>
