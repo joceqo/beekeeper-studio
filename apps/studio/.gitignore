@@ -1,2 +1,5 @@
 *.db
 *.duckdb
+
+# macOS notarization credentials (local only)
+.env.notarize

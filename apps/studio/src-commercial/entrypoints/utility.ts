@@ -228,22 +228,40 @@ async function startMcpServer() {
     log.info("MCP server disabled (set [mcp] enabled = true to expose connections)");
     return;
   }
-  try {
+  const configuredPort =
+    typeof mcpConfig.port === "number" ? mcpConfig.port : 27500;
+  const defaultAccess = (mcpConfig.defaultAccess as McpAccess) ?? "read";
+
+  const tryStart = async (port: number) => {
     mcpServer = new BeekeeperMcpServer({
-      port: typeof mcpConfig.port === "number" ? mcpConfig.port : 27420,
-      defaultAccess: (mcpConfig.defaultAccess as McpAccess) ?? "read",
+      port,
+      defaultAccess,
       version: platformInfo.appVersion,
     });
     const url = await mcpServer.start();
     log.info(`MCP server ready at ${url}`);
+  };
+
+  try {
+    await tryStart(configuredPort);
   } catch (e) {
     mcpServer = null;
     const err = e as NodeJS.ErrnoException;
-    if (err?.code === "EADDRINUSE") {
-      log.error(
-        `Failed to start MCP server: port ${mcpConfig.port} is already in use. ` +
-          `Set a different [mcp] port in config.`
+    // Port taken (e.g. another app like SlashTable uses it, or a second
+    // instance): fall back to an ephemeral port so the feature still works.
+    // The renderer reads the resolved URL, so "Copy config" stays correct.
+    if (err?.code === "EADDRINUSE" && configuredPort !== 0) {
+      log.warn(
+        `MCP port ${configuredPort} is in use; retrying on an ephemeral port.`
       );
+      try {
+        await tryStart(0);
+      } catch (e2) {
+        mcpServer = null;
+        log.error(
+          `Failed to start MCP server on a fallback port: ${(e2 as Error)?.message ?? e2}`
+        );
+      }
     } else {
       log.error(`Failed to start MCP server: ${err?.message ?? e}`, err?.stack ?? "");
     }
