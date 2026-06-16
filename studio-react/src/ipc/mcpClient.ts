@@ -323,6 +323,28 @@ export class McpBackendClient implements BackendClient {
     return this.resolveConnection(connectionId);
   }
 
+  /**
+   * Force a fresh connection: drop cached live ids (read + write) and any
+   * in-flight resolves, best-effort disconnect the live id, then re-resolve so
+   * the next call opens a clean connection. Recovers from a stale pool after a
+   * network flap.
+   */
+  async reconnect(connectionId: string): Promise<string> {
+    const live = this.liveByUiId.get(connectionId);
+    this.liveByUiId.delete(connectionId);
+    this.writeByUiId.delete(connectionId);
+    this.connecting.delete(connectionId);
+    this.writeConnecting.delete(connectionId);
+    if (live) {
+      try {
+        await this.callTool("disconnect", { connectionId: live });
+      } catch {
+        // No disconnect tool or already gone — re-resolve regardless.
+      }
+    }
+    return this.resolveConnection(connectionId);
+  }
+
   async listDockerContainers(): Promise<DockerContainer[]> {
     // The MCP HTTP server exposes no Docker inspection; degrade to none.
     return [];

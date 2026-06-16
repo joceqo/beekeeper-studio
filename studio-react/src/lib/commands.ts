@@ -233,7 +233,7 @@ export function useCommands(): { commands: CommandDef[]; run: (id: string) => vo
             return;
           }
           void backend
-            .connect(conn)
+            .reconnect(conn)
             .then(() => notify.success("Reconnected"))
             .catch(() => notify.error("Reconnect failed"));
         },

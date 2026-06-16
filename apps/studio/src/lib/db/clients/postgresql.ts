@@ -1515,6 +1515,12 @@ export class PostgresClient extends BasicDatabaseClient<QueryResult, PoolClient>
       max: BksConfig.db.postgres.maxConnections, // max idle connections per time (30 secs)
       connectionTimeoutMillis: BksConfig.db.postgres.connectionTimeout,
       idleTimeoutMillis: BksConfig.db.postgres.idleTimeout,
+      // Enable TCP keepalive so the pool detects sockets that died silently
+      // (e.g. after a VPN drop/reconnect) instead of handing out dead clients
+      // and pinning the pool until every query fails with
+      // "timeout exceeded when trying to connect". Probes start after 10s idle.
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10000,
     };
 
     if (server.config.azureAuthOptions?.azureAuthEnabled) {

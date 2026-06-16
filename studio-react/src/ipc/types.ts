@@ -321,6 +321,12 @@ export interface BackendClient {
    * live connectionId. Idempotent and deduped per connection.
    */
   connect(connectionId: string): Promise<string>;
+  /**
+   * Force a fresh connection, tearing down and rebuilding the backend pool.
+   * Unlike connect(), never short-circuits when already connected — used to
+   * recover from a stale pool after a network flap (e.g. VPN reconnect).
+   */
+  reconnect(connectionId: string): Promise<string>;
   listSchemas(connectionId: string): Promise<Schema[]>;
   listTables(connectionId: string, schema?: string): Promise<TableSummary[]>;
   describeTable(

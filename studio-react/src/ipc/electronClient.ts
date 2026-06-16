@@ -320,6 +320,27 @@ export class ElectronBackendClient implements BackendClient {
     return promise;
   }
 
+  /**
+   * Force a fresh connection, rebuilding the backend pool. Unlike connect(),
+   * this does NOT short-circuit when already connected: it tears the live
+   * connection down (conn/disconnect) and opens it again (conn/create). Needed
+   * after a network flap (e.g. VPN reconnect) leaves the pool pinned by dead
+   * sockets, where queries fail with "timeout exceeded when trying to connect"
+   * and a plain connect() would no-op.
+   */
+  async reconnect(connectionId: string): Promise<string> {
+    await this.transport.whenReady();
+    // Drop any in-flight connect so it can't re-add to `connected` mid-teardown.
+    this.connecting.delete(connectionId);
+    try {
+      await this.send<void>("conn/disconnect", { sId: this.connSid(connectionId) });
+    } catch {
+      // Already down or never up — proceed to reopen regardless.
+    }
+    this.connected.delete(connectionId);
+    return this.connect(connectionId);
+  }
+
   async listSchemas(connectionId: string): Promise<Schema[]> {
     await this.connect(connectionId);
     const schemas = await this.sendConn<string[]>(connectionId, "conn/listSchemas", {});

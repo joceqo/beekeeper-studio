@@ -305,6 +305,12 @@ export class MockBackendClient implements BackendClient {
     return connectionId;
   }
 
+  /** Mock connections never go stale; reconnect is the same echo as connect. */
+  async reconnect(connectionId: string) {
+    await delay(jitter(40, 120));
+    return connectionId;
+  }
+
   async listConnections() {
     await delay(jitter(60, 160));
     return structuredClone(MOCK_CONNECTIONS);
