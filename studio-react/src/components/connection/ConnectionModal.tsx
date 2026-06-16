@@ -282,7 +282,9 @@ function ConnectionForm({
       sshHost: !isSqlite && sshEnabled ? sshHost || null : null,
       sshPort: !isSqlite && sshEnabled ? (sshPort ? Number(sshPort) : 22) : null,
       sshUsername: !isSqlite && sshEnabled ? sshUsername || null : null,
-      sshMode: !isSqlite && sshEnabled ? sshMode : null,
+      // sshMode is NOT NULL in the backend (defaults to "agent"); always send a
+      // valid mode even when SSH is off, otherwise the save fails the constraint.
+      sshMode: sshMode,
       sshPassword:
         !isSqlite && sshEnabled && sshMode === "userpass" ? sshPassword || null : null,
       sshKeyfile: !isSqlite && sshEnabled && sshMode === "keyfile" ? sshKeyfile || null : null,
